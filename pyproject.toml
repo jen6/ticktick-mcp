@@ -1,0 +1,30 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ticktick-mcp"
+version = "0.1.0"
+description = "MCP server for interacting with the TickTick API."
+authors = [
+  { name="Your Name", email="you@example.com" }, # 이 부분을 실제 정보로 수정하세요
+]
+readme = "README.md"
+requires-python = ">=3.10"
+classifiers = [
+    "Programming Language :: Python :: 3",
+[project.urls]
+    "Operating System :: OS Independent",
+]
+dependencies = [
+    "anyio>=4.9.0",
+    "mcp>=1.6.0",
+    "python-dotenv>=1.1.0",
+    "ticktick-py>=2.0.1",
+]
+
+[project.scripts]
+ticktick-mcp = "ticktick_mcp:main"
+
+[project.urls]
+"Homepage" = "https://github.com/yourusername/ticktick-mcp"
