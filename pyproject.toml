@@ -15,7 +15,7 @@ dependencies = [
     "anyio>=4.9.0",
     "mcp>=1.6.0",
     "python-dotenv>=1.1.0",
-    "ticktick-py>=2.0.1",
+    "ticktick-py",
 ]
 
 [project.scripts]
@@ -23,3 +23,6 @@ ticktick-mcp = "ticktick_mcp:main"
 
 [project.urls]
 "Homepage" = "https://github.com/jen6/ticktick-mcp"
+
+[tool.uv.sources]
+ticktick-py = { git = "https://github.com/jen6/ticktick-py.git", rev = "main" }
