@@ -242,21 +242,21 @@ async def ticktick_create_task(
     items: Optional[List[Dict[str, Any]]] = None # Subtasks [{ "title": "subtask1", "status": 0}]
 ) -> str:
     """
-    TickTick에 새로운 할 일(task)을 생성합니다.
+    Creates a new task in TickTick.
 
-    에이전트 사용 가이드:
-    - 필수 인자: 'title' (할 일 제목).
-    - 선택적 인자:
-        - 'projectId': 할 일을 추가할 프로젝트 ID. 지정하지 않으면 기본 받은편지함(inbox)에 추가됩니다.
-        - 'content'/'desc': 할 일의 내용 또는 설명.
-        - 'startDate'/'dueDate': 시작/마감 날짜 및 시간. **ISO 8601 형식 문자열** (예: '2025-04-26T10:00:00')로 제공해야 합니다.
-        - 'allDay': True로 설정하면 시간 정보 없이 날짜만 사용됩니다.
-        - 'timeZone': 날짜/시간의 기준 시간대 (예: 'Asia/Seoul', 'UTC').
-        - 'reminders': 알림 설정 문자열 리스트 (TickTick 형식 따름).
-        - 'repeat': 반복 설정 문자열 (TickTick 형식 따름, 예: 'RRULE:FREQ=DAILY;INTERVAL=1').
-        - 'priority': 우선순위 (0: 없음, 1: 낮음, 3: 중간, 5: 높음).
-        - 'items': 하위 할 일(subtask) 목록. 각 하위 할 일은 {'title': '...', 'status': 0} 형태의 딕셔너리입니다.
-    - 반환값: 성공 시 생성된 할 일 객체(TaskObject)의 JSON 문자열. 실패 시 에러 정보가 포함된 JSON 문자열.
+    Agent Usage Guide:
+    - Required argument: 'title' (Task title).
+    - Optional arguments:
+        - 'projectId': ID of the project to add the task to. If not specified, adds to the default inbox.
+        - 'content'/'desc': Content or description of the task.
+        - 'startDate'/'dueDate': Start/due date and time. Must be provided as **ISO 8601 format strings** (e.g., '2025-04-26T10:00:00').
+        - 'allDay': If set to True, uses only the date without time information.
+        - 'timeZone': Timezone for the date/time (e.g., 'Asia/Seoul', 'UTC').
+        - 'reminders': List of reminder setting strings (follows TickTick format).
+        - 'repeat': Repetition setting string (follows TickTick format, e.g., 'RRULE:FREQ=DAILY;INTERVAL=1').
+        - 'priority': Priority level (0: None, 1: Low, 3: Medium, 5: High).
+        - 'items': List of subtasks. Each subtask is a dictionary like {'title': '...', 'status': 0}.
+    - Returns: On success, a JSON string of the created task object (TaskObject). On failure, a JSON string containing error information.
     """
     if not ticktick_client:
         return format_response({"error": "TickTick client not initialized."})
@@ -290,18 +290,18 @@ async def ticktick_create_task(
 @mcp.tool()
 async def ticktick_update_task(task_object: TaskObject) -> str:
     """
-    기존 할 일(task)의 내용을 업데이트합니다.
+    Updates the content of an existing task.
 
-    에이전트 사용 가이드:
-    - 필수 인자: 'task_object' - 업데이트할 필드가 **포함된 전체 할 일 객체 딕셔너리**. 'id' 필드가 반드시 포함되어야 합니다.
-    - 사용 방법:
-        1. 먼저 `ticktick_get_by_id` 또는 `ticktick_get_by_fields`를 사용하여 업데이트하려는 할 일의 **전체 객체**를 가져옵니다.
-        2. 가져온 객체에서 변경하려는 필드의 값을 수정합니다.
-        3. 수정된 **전체 객체**를 이 함수의 'task_object' 인자로 전달합니다.
-    - 주의사항:
-        - 날짜 필드('startDate', 'dueDate', 'completedTime')는 TickTick API가 요구하는 특정 형식의 문자열이어야 합니다 (예: '2025-04-26T10:00:00.000+0000').
-        - 필요하다면 `ticktick_convert_datetime_to_ticktick_format` 헬퍼 도구를 사용하여 ISO 8601 문자열을 TickTick 형식으로 변환할 수 있습니다.
-    - 반환값: 성공 시 업데이트된 할 일 객체(TaskObject)의 JSON 문자열. 실패 시 에러 정보가 포함된 JSON 문자열.
+    Agent Usage Guide:
+    - Required argument: 'task_object' - The **entire task object dictionary containing the fields to update**. Must include the 'id' field.
+    - How to use:
+        1. First, retrieve the **entire object** of the task you want to update using `ticktick_get_by_id` or `ticktick_get_by_fields`.
+        2. Modify the values of the fields you want to change in the retrieved object.
+        3. Pass the modified **entire object** as the 'task_object' argument to this function.
+    - Important notes:
+        - Date fields ('startDate', 'dueDate', 'completedTime') must be strings in the specific format required by the TickTick API (e.g., '2025-04-26T10:00:00.000+0000').
+        - If necessary, you can use the `ticktick_convert_datetime_to_ticktick_format` helper tool to convert ISO 8601 strings to the TickTick format.
+    - Returns: On success, a JSON string of the updated task object (TaskObject). On failure, a JSON string containing error information.
     """
     if not ticktick_client:
         return format_response({"error": "TickTick client not initialized."})
@@ -317,13 +317,13 @@ async def ticktick_update_task(task_object: TaskObject) -> str:
 @mcp.tool()
 async def ticktick_delete_tasks(task_ids: Union[TaskId, ListOfTaskIds]) -> str:
     """
-    ID를 사용하여 하나 또는 여러 개의 할 일(task)을 삭제합니다.
+    Deletes one or more tasks using their IDs.
 
-    에이전트 사용 가이드:
-    - 필수 인자: 'task_ids' - 삭제할 할 일의 ID (문자열) 또는 ID 리스트 (문자열 리스트).
-    - 동작 방식: 내부적으로 ID를 사용하여 실제 할 일 객체를 찾은 후 삭제를 시도합니다.
-    - 반환값: 성공 시 삭제 작업 결과(TickTick API 응답 기반)의 JSON 문자열. ID를 찾지 못하거나 실패 시 에러/메시지 정보가 포함된 JSON 문자열.
-    - 주의: 삭제된 할 일은 복구하기 어려울 수 있습니다.
+    Agent Usage Guide:
+    - Required argument: 'task_ids' - The ID (string) or list of IDs (list of strings) of the task(s) to delete.
+    - How it works: Internally finds the actual task objects using the IDs and then attempts deletion.
+    - Returns: On success, a JSON string of the deletion result (based on TickTick API response). If IDs are not found or deletion fails, returns a JSON string containing error/message information.
+    - Caution: Deleted tasks might be difficult to recover.
     """
     if not ticktick_client:
         return format_response({"error": "TickTick client not initialized."})
@@ -386,15 +386,15 @@ async def ticktick_get_completed_tasks(
     tz: Optional[str] = None
 ) -> str:
     """
-    지정된 기간 내에 완료된 할 일(task) 목록을 가져옵니다.
+    Retrieves a list of tasks completed within a specified date range.
 
-    에이전트 사용 가이드:
-    - 필수 인자: 'start_date' - 조회 시작 날짜. **ISO 8601 형식 문자열** (예: '2025-04-26' 또는 '2025-04-26T10:00:00').
-    - 선택적 인자:
-        - 'end_date': 조회 종료 날짜. **ISO 8601 형식 문자열**. 지정하지 않으면 'start_date' 당일만 조회합니다.
-        - 'include_time': True로 설정하면 날짜뿐만 아니라 시간까지 고려하여 범위를 지정합니다 (ticktick-py의 'full=False'에 해당). False(기본값)이면 시간은 무시하고 날짜만 비교합니다.
-        - 'tz': 날짜 비교에 사용할 시간대 (예: 'Asia/Seoul', 'UTC').
-    - 반환값: 성공 시 완료된 할 일 객체(TaskObject) 리스트의 JSON 문자열. 실패 시 에러 정보가 포함된 JSON 문자열. 날짜 형식이 잘못된 경우 에러를 반환합니다.
+    Agent Usage Guide:
+    - Required argument: 'start_date' - The start date for the query. Must be an **ISO 8601 format string** (e.g., '2025-04-26' or '2025-04-26T10:00:00').
+    - Optional arguments:
+        - 'end_date': The end date for the query. **ISO 8601 format string**. If not specified, queries only for the 'start_date'.
+        - 'include_time': If True, considers time as well as date for the range (corresponds to 'full=False' in ticktick-py). If False (default), ignores time and compares dates only.
+        - 'tz': Timezone to use for date comparison (e.g., 'Asia/Seoul', 'UTC').
+    - Returns: On success, a JSON string of the list of completed task objects (TaskObject). On failure, a JSON string containing error information. Returns an error if the date format is invalid.
     """
     if not ticktick_client:
         return format_response({"error": "TickTick client not initialized."})
@@ -417,12 +417,12 @@ async def ticktick_get_completed_tasks(
 @mcp.tool()
 async def ticktick_get_tasks_from_project(project_id: ProjectId) -> str:
     """
-    특정 프로젝트 ID에 속한 모든 *미완료* 할 일(task) 목록을 가져옵니다.
+    Retrieves a list of all *uncompleted* tasks belonging to a specific project ID.
 
-    에이전트 사용 가이드:
-    - 필수 인자: 'project_id' - 할 일을 가져올 프로젝트의 ID (문자열).
-    - 동작 방식: 해당 프로젝트 내의 완료되지 않은 할 일만 반환합니다. 완료된 할 일은 포함되지 않습니다.
-    - 반환값: 성공 시 해당 프로젝트의 미완료 할 일 객체(TaskObject) 리스트의 JSON 문자열. 프로젝트 ID가 유효하지 않거나 실패 시 에러 정보가 포함된 JSON 문자열. 목록이 비어 있을 경우 빈 리스트 '[]'를 반환합니다.
+    Agent Usage Guide:
+    - Required argument: 'project_id' - The ID (string) of the project from which to fetch tasks.
+    - How it works: Returns only the uncompleted tasks within the specified project. Completed tasks are not included.
+    - Returns: On success, a JSON string of the list of uncompleted task objects (TaskObject) for the project. If the project ID is invalid or fetching fails, returns a JSON string with error information. Returns an empty list '[]' if the list is empty.
     """
     if not ticktick_client:
         return format_response({"error": "TickTick client not initialized."})
@@ -438,12 +438,12 @@ async def ticktick_get_tasks_from_project(project_id: ProjectId) -> str:
 @mcp.tool()
 async def ticktick_complete_task(task_id: TaskId) -> str:
     """
-    ID를 사용하여 특정 할 일(task) 하나를 완료 상태로 변경합니다.
+    Marks a specific task as complete using its ID.
 
-    에이전트 사용 가이드:
-    - 필수 인자: 'task_id' - 완료 처리할 할 일의 ID (문자열).
-    - 동작 방식: ID를 사용하여 할 일 객체를 찾은 후 완료 처리합니다.
-    - 반환값: 성공 시 상태가 업데이트된 할 일 객체(TaskObject)의 JSON 문자열. 할 일을 찾지 못하거나 실패 시 에러 정보가 포함된 JSON 문자열.
+    Agent Usage Guide:
+    - Required argument: 'task_id' - The ID (string) of the task to mark as complete.
+    - How it works: Finds the task object using the ID and then marks it as complete.
+    - Returns: On success, a JSON string of the updated task object (TaskObject). If the task is not found or completion fails, returns a JSON string with error information.
     """
     if not ticktick_client:
         return format_response({"error": "TickTick client not initialized."})
@@ -469,14 +469,14 @@ async def ticktick_complete_task(task_id: TaskId) -> str:
 @mcp.tool()
 async def ticktick_move_task(task_id: TaskId, new_project_id: ProjectId) -> str:
     """
-    특정 할 일(task) 하나를 다른 프로젝트로 이동시킵니다.
+    Moves a specific task to a different project.
 
-    에이전트 사용 가이드:
-    - 필수 인자:
-        - 'task_id': 이동시킬 할 일의 ID (문자열).
-        - 'new_project_id': 할 일을 이동시킬 대상 프로젝트의 ID (문자열).
-    - 동작 방식: 'task_id'로 할 일을 찾아 'new_project_id' 프로젝트로 이동합니다.
-    - 반환값: 성공 시 이동된 할 일 객체(TaskObject)의 JSON 문자열. 할 일 또는 프로젝트를 찾지 못하거나 실패 시 에러 정보가 포함된 JSON 문자열.
+    Agent Usage Guide:
+    - Required arguments:
+        - 'task_id': The ID (string) of the task to move.
+        - 'new_project_id': The ID (string) of the target project to move the task to.
+    - How it works: Finds the task by 'task_id' and moves it to the 'new_project_id' project.
+    - Returns: On success, a JSON string of the moved task object (TaskObject). If the task or project is not found or moving fails, returns a JSON string with error information.
     """
     if not ticktick_client:
         return format_response({"error": "TickTick client not initialized."})
@@ -499,14 +499,14 @@ async def ticktick_move_task(task_id: TaskId, new_project_id: ProjectId) -> str:
 @mcp.tool()
 async def ticktick_make_subtask(child_task_id: TaskId, parent_task_id: TaskId) -> str:
     """
-    한 할 일(child)을 다른 할 일(parent)의 하위 할 일(subtask)로 만듭니다. 두 할 일은 반드시 같은 프로젝트에 속해야 합니다.
+    Makes one task (child) a subtask of another task (parent). Both tasks must belong to the same project.
 
-    에이전트 사용 가이드:
-    - 필수 인자:
-        - 'child_task_id': 하위 할 일이 될 기존 할 일의 ID (문자열).
-        - 'parent_task_id': 상위 할 일이 될 기존 할 일의 ID (문자열).
-    - 제약 조건: 두 할 일은 동일한 프로젝트 내에 있어야 합니다.
-    - 반환값: 성공 시 하위 할 일이 추가된 *상위* 할 일 객체(TaskObject)와 성공 메시지가 포함된 JSON 문자열. 할 일을 찾지 못하거나 다른 프로젝트에 있거나 실패 시 에러 정보가 포함된 JSON 문자열.
+    Agent Usage Guide:
+    - Required arguments:
+        - 'child_task_id': The ID (string) of the existing task that will become the subtask.
+        - 'parent_task_id': The ID (string) of the existing task that will become the parent task.
+    - Constraint: Both tasks must be in the same project.
+    - Returns: On success, a JSON string containing the *parent* task object (TaskObject) with the added subtask and a success message. If tasks are not found, are in different projects, or the operation fails, returns a JSON string with error information.
     """
     if not ticktick_client:
         return format_response({"error": "TickTick client not initialized."})
@@ -835,14 +835,14 @@ async def ticktick_make_subtask(child_task_id: TaskId, parent_task_id: TaskId) -
 @mcp.tool()
 async def ticktick_convert_datetime_to_ticktick_format(datetime_iso_string: str, tz: str) -> str:
     """
-    [헬퍼 도구] ISO 8601 형식의 날짜/시간 문자열을 TickTick API 업데이트 시 필요한 특정 형식의 문자열로 변환합니다.
+    [Helper Tool] Converts an ISO 8601 format date/time string to the specific string format required for TickTick API updates.
 
-    에이전트 사용 가이드:
-    - 목적: `ticktick_update_task`와 같이 TickTick 날짜 형식이 필요한 함수에 전달할 날짜 문자열을 생성할 때 사용합니다.
-    - 필수 인자:
-        - 'datetime_iso_string': 변환할 날짜/시간. **ISO 8601 형식 문자열** (예: '2025-04-26T10:00:00').
-        - 'tz': 해당 날짜/시간의 기준 시간대 (예: 'America/New_York', 'Asia/Seoul', 'UTC'). 유효한 TZ 데이터베이스 이름이어야 합니다.
-    - 반환값: 성공 시 TickTick 형식의 날짜 문자열 (예: '2025-04-26T10:00:00.000+0000')을 포함한 JSON 문자열 ({"ticktick_format": "..."}). 실패 시 에러 정보가 포함된 JSON 문자열.
+    Agent Usage Guide:
+    - Purpose: Use this to generate date strings for functions that require the TickTick date format, such as `ticktick_update_task`.
+    - Required arguments:
+        - 'datetime_iso_string': The date/time to convert. Must be an **ISO 8601 format string** (e.g., '2025-04-26T10:00:00').
+        - 'tz': The timezone of the given date/time (e.g., 'America/New_York', 'Asia/Seoul', 'UTC'). Must be a valid TZ database name.
+    - Returns: On success, a JSON string containing the TickTick formatted date string (e.g., '{"ticktick_format": "2025-04-26T10:00:00.000+0000"}'). On failure, a JSON string containing error information.
     """
     try:
         dt_obj = datetime.datetime.fromisoformat(datetime_iso_string)
@@ -860,12 +860,12 @@ async def ticktick_convert_datetime_to_ticktick_format(datetime_iso_string: str,
 @mcp.tool()
 async def ticktick_get_by_id(obj_id: str) -> str:
     """
-    고유 ID를 사용하여 TickTick 객체 (할 일, 프로젝트, 태그 등) 하나를 가져옵니다.
+    Retrieves a single TickTick object (task, project, tag, etc.) using its unique ID.
 
-    에이전트 사용 가이드:
-    - 필수 인자: 'obj_id' - 찾으려는 객체의 고유 ID (문자열).
-    - 사용 목적: 특정 객체의 최신 정보를 조회하거나, 다른 함수(예: `ticktick_update_task`, `ticktick_complete_task`)에 전달할 객체를 얻기 위해 사용합니다.
-    - 반환값: 성공 시 찾은 객체 (TaskObject, ProjectObject 등)의 JSON 문자열. ID에 해당하는 객체를 찾지 못하면 'null'을 반환합니다. 실패 시 에러 정보가 포함된 JSON 문자열.
+    Agent Usage Guide:
+    - Required argument: 'obj_id' - The unique ID (string) of the object to find.
+    - Purpose: Use this to query the latest information for a specific object or to obtain an object to pass to other functions (e.g., `ticktick_update_task`, `ticktick_complete_task`).
+    - Returns: On success, a JSON string of the found object (TaskObject, ProjectObject, etc.). Returns 'null' if no object is found for the ID. On failure, returns a JSON string with error information.
     """
     if not ticktick_client:
         return format_response({"error": "TickTick client not initialized."})
@@ -881,14 +881,14 @@ async def ticktick_get_by_id(obj_id: str) -> str:
 @mcp.tool()
 async def ticktick_get_by_fields(search: str, **fields: Any) -> str:
     """
-    여러 필드 조건을 만족하는 TickTick 객체 **하나**를 검색하여 가져옵니다.
+    Searches for and retrieves **one** TickTick object that matches multiple field conditions.
 
-    에이전트 사용 가이드:
-    - 필수 인자:
-        - 'search': 검색할 객체 유형 (문자열). 'tasks', 'projects', 'tags', 'project_folders' 중 하나여야 합니다.
-        - '**fields': 검색 조건으로 사용할 필드와 값의 키워드 인자. **적어도 하나 이상의 필드 조건**을 제공해야 합니다. (예: `title='중요 회의'`, `name='업무 프로젝트'`)
-    - 동작 방식: 제공된 필드 조건과 **모두 일치**하는 객체를 검색합니다. 여러 객체가 조건에 맞더라도 **첫 번째** 찾은 객체만 반환합니다.
-    - 반환값: 성공 시 조건에 맞는 첫 번째 객체(TaskObject, ProjectObject 등)의 JSON 문자열. 조건에 맞는 객체가 없으면 'null'을 반환합니다. 인자 오류 또는 실패 시 에러 정보가 포함된 JSON 문자열.
+    Agent Usage Guide:
+    - Required arguments:
+        - 'search': The type of object to search for (string). Must be one of 'tasks', 'projects', 'tags', 'project_folders'.
+        - '**fields': Keyword arguments for the field conditions to use for searching. **At least one field condition** must be provided (e.g., `title='Important Meeting'`, `name='Work Project'`).
+    - How it works: Searches for objects where **all** provided field conditions match. Even if multiple objects match, only the **first** one found is returned.
+    - Returns: On success, a JSON string of the first matching object (TaskObject, ProjectObject, etc.). Returns 'null' if no matching object is found. On argument error or failure, returns a JSON string with error information.
     """
     if not ticktick_client:
         return format_response({"error": "TickTick client not initialized."})
@@ -911,16 +911,16 @@ async def ticktick_get_by_fields(search: str, **fields: Any) -> str:
 @mcp.tool()
 async def ticktick_get_all(search: str) -> str:
     """
-    지정된 유형의 모든 TickTick 객체 목록을 가져옵니다.
+    Retrieves a list of all TickTick objects of a specified type.
 
-    에이전트 사용 가이드:
-    - 필수 인자: 'search' - 가져올 객체 유형 (문자열). 'tasks', 'projects', 'tags', 'project_folders' 중 하나여야 합니다.
-    - 동작 방식:
-        - 'tasks': 모든 프로젝트(받은편지함 포함)에서 **미완료된** 할 일 목록을 가져옵니다. (내부적으로 `_get_all_tasks_from_ticktick` 헬퍼 사용)
-        - 'projects': 모든 프로젝트 목록을 가져옵니다.
-        - 'tags': 모든 태그 목록을 가져옵니다.
-        - 'project_folders': 모든 프로젝트 폴더 목록을 가져옵니다.
-    - 반환값: 성공 시 해당 유형의 객체 리스트(ListOfTaskObjects, ListOfProjectObjects 등)의 JSON 문자열. 목록이 비어있으면 빈 리스트 '[]'를 반환합니다. 실패 시 에러 정보가 포함된 JSON 문자열.
+    Agent Usage Guide:
+    - Required argument: 'search' - The type of objects to retrieve (string). Must be one of 'tasks', 'projects', 'tags', 'project_folders'.
+    - How it works:
+        - 'tasks': Retrieves a list of **uncompleted** tasks from all projects (including inbox). (Uses the internal `_get_all_tasks_from_ticktick` helper)
+        - 'projects': Retrieves a list of all projects.
+        - 'tags': Retrieves a list of all tags.
+        - 'project_folders': Retrieves a list of all project folders.
+    - Returns: On success, a JSON string of the list of objects of the specified type (ListOfTaskObjects, ListOfProjectObjects, etc.). Returns an empty list '[]' if the list is empty. On failure, returns a JSON string with error information.
     """
     if not ticktick_client:
         return format_response({"error": "TickTick client not initialized."})
@@ -957,16 +957,16 @@ async def ticktick_get_all(search: str) -> str:
 @mcp.tool()
 async def ticktick_filter_tasks(filters_json: str) -> str:
     """
-    [필터링 도구] 모든 *미완료* 할 일(task) 중에서 주어진 필터 조건과 일치하는 할 일 목록을 반환합니다.
+    [Filtering Tool] Returns a list of *uncompleted* tasks that match the given filter conditions.
 
-    에이전트 사용 가이드:
-    - 필수 인자: 'filters_json' - 필터링 조건을 나타내는 **JSON 형식의 문자열**. JSON 객체(딕셔너리) 형태여야 합니다. (예: `'{\"priority\": 5, \"projectId\": \"project123\"}'`)
-    - 지원 필터: 할 일 객체(TaskObject)에 포함된 대부분의 필드를 기준으로 필터링할 수 있습니다 (예: 'status', 'priority', 'projectId', 'tags' 등).
-        - 'status': 이 함수는 미완료 할 일만 대상으로 하므로 `status: 0` 조건은 항상 참입니다.
-        - 'priority': 0(없음), 1(낮음), 3(중간), 5(높음).
-        - 'tags': 태그 이름 리스트와 정확히 일치하는지 확인합니다 (부분 일치 아님).
-    - 동작 방식: 모든 미완료 할 일을 가져온 후, 'filters_json'에 명시된 **모든 조건**과 일치하는 할 일만 필터링합니다.
-    - 반환값: 성공 시 필터링된 할 일 객체(TaskObject) 리스트의 JSON 문자열. 조건에 맞는 할 일이 없으면 빈 리스트 '[]'를 반환합니다. JSON 형식이 잘못되었거나 실패 시 에러 정보가 포함된 JSON 문자열.
+    Agent Usage Guide:
+    - Required argument: 'filters_json' - A **JSON formatted string** representing the filter conditions. Must be a JSON object (dictionary) (e.g., `'{\"priority\": 5, \"projectId\": \"project123\"}'`).
+    - Supported Filters: Can filter based on most fields present in a TaskObject (e.g., 'status', 'priority', 'projectId', 'tags', etc.).
+        - 'status': Since this function targets uncompleted tasks, a `status: 0` condition is implicitly true.
+        - 'priority': 0 (None), 1 (Low), 3 (Medium), 5 (High).
+        - 'tags': Checks for an exact match with the list of tag names (not partial match).
+    - How it works: Fetches all uncompleted tasks, then filters them, keeping only those that match **all** conditions specified in 'filters_json'.
+    - Returns: On success, a JSON string of the list of filtered task objects (TaskObject). Returns an empty list '[]' if no tasks match the conditions. Returns a JSON string with error information if the JSON format is invalid or if the operation fails.
     """
     if not ticktick_client:
         return format_response({"error": "TickTick client not initialized."})
@@ -1034,15 +1034,15 @@ async def ticktick_get_due_today_or_overdue_tasks(
     sort_by_priority: bool = True
 ) -> str:
     """
-    [특수 필터링 도구] 오늘 마감이거나 이미 마감일이 지난 모든 *미완료* 할 일 목록을 가져옵니다. 선택적으로 태그 필터링 및 우선순위 정렬을 적용합니다.
+    [Special Filtering Tool] Retrieves all *uncompleted* tasks that are due today or already overdue. Optionally filters by tag and sorts by priority.
 
-    에이전트 사용 가이드:
-    - 목적: 오늘 처리해야 하거나 지연된 할 일을 빠르게 확인하는 데 사용합니다.
-    - 선택적 인자:
-        - 'tag_label': 특정 태그가 지정된 할 일만 필터링합니다. 태그 이름(문자열)을 제공합니다.
-        - 'sort_by_priority': True(기본값)로 설정하면 결과를 우선순위가 높은 순서 (높음 -> 중간 -> 낮음 -> 없음)로 정렬합니다.
-    - 동작 방식: 모든 미완료 할 일을 가져온 후, 마감일(dueDate)이 오늘(함수 실행 시점 기준) 또는 그 이전인 할 일만 선택합니다. 추가로 'tag_label'이 제공되면 해당 태그를 가진 할 일만 남깁니다. 마지막으로 'sort_by_priority' 설정에 따라 정렬합니다.
-    - 반환값: 성공 시 조건에 맞는 할 일 객체(TaskObject) 리스트의 JSON 문자열. 조건에 맞는 할 일이 없으면 빈 리스트 '[]'를 반환합니다. 실패 시 에러 정보가 포함된 JSON 문자열.
+    Agent Usage Guide:
+    - Purpose: Useful for quickly finding tasks that need attention today or are delayed.
+    - Optional arguments:
+        - 'tag_label': Filters for tasks that have the specified tag. Provide the tag name (string).
+        - 'sort_by_priority': If True (default), sorts the results by priority in descending order (High -> Medium -> Low -> None).
+    - How it works: Fetches all uncompleted tasks, selects those whose 'dueDate' is today (based on execution time) or earlier. If 'tag_label' is provided, further filters by that tag. Finally, sorts according to 'sort_by_priority'.
+    - Returns: On success, a JSON string of the list of matching task objects (TaskObject). Returns an empty list '[]' if no tasks match. On failure, returns a JSON string with error information.
     """
     if not ticktick_client:
         return format_response({"error": "TickTick client not initialized."})
@@ -1090,15 +1090,15 @@ async def ticktick_get_due_this_friday_or_overdue_tasks(
     sort_by_priority: bool = True
 ) -> str:
     """
-    [특수 필터링 도구] 이번 주 금요일까지 마감이거나 이미 마감일이 지난 모든 *미완료* 할 일 목록을 가져옵니다. 선택적으로 태그 필터링 및 우선순위 정렬을 적용합니다.
+    [Special Filtering Tool] Retrieves all *uncompleted* tasks that are due by this Friday or are already overdue. Optionally filters by tag and sorts by priority.
 
-    에이전트 사용 가이드:
-    - 목적: 이번 주 내(금요일까지) 처리해야 하거나 지연된 할 일을 확인하는 데 사용합니다.
-    - 선택적 인자:
-        - 'tag_label': 특정 태그가 지정된 할 일만 필터링합니다. 태그 이름(문자열)을 제공합니다.
-        - 'sort_by_priority': True(기본값)로 설정하면 결과를 우선순위가 높은 순서 (높음 -> 중간 -> 낮음 -> 없음)로 정렬합니다.
-    - 동작 방식: 모든 미완료 할 일을 가져온 후, 마감일(dueDate)이 이번 주 금요일(함수 실행 시점 기준) 또는 그 이전인 할 일만 선택합니다. '금요일'은 현재 주의 금요일을 의미합니다. 추가로 'tag_label'이 제공되면 해당 태그를 가진 할 일만 남깁니다. 마지막으로 'sort_by_priority' 설정에 따라 정렬합니다.
-    - 반환값: 성공 시 조건에 맞는 할 일 객체(TaskObject) 리스트의 JSON 문자열. 조건에 맞는 할 일이 없으면 빈 리스트 '[]'를 반환합니다. 실패 시 에러 정보가 포함된 JSON 문자열.
+    Agent Usage Guide:
+    - Purpose: Useful for finding tasks that need to be handled within the current week (by Friday) or are delayed.
+    - Optional arguments:
+        - 'tag_label': Filters for tasks that have the specified tag. Provide the tag name (string).
+        - 'sort_by_priority': If True (default), sorts the results by priority in descending order (High -> Medium -> Low -> None).
+    - How it works: Fetches all uncompleted tasks, selects those whose 'dueDate' is this Friday (based on execution time) or earlier. 'Friday' refers to the upcoming Friday of the current week. If 'tag_label' is provided, further filters by that tag. Finally, sorts according to 'sort_by_priority'.
+    - Returns: On success, a JSON string of the list of matching task objects (TaskObject). Returns an empty list '[]' if no tasks match. On failure, returns a JSON string with error information.
     """
     if not ticktick_client:
         return format_response({"error": "TickTick client not initialized."})
