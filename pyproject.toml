@@ -19,10 +19,13 @@ dependencies = [
 ]
 
 [project.scripts]
-ticktick-mcp = "ticktick_mcp:main"
+ticktick-mcp = "main:main"
 
 [project.urls]
 "Homepage" = "https://github.com/jen6/ticktick-mcp"
 
 [tool.uv.sources]
 ticktick-py = { git = "https://github.com/jen6/ticktick-py.git", rev = "main" }
+
+[tool.setuptools.packages.find]
+where = ["src"]
