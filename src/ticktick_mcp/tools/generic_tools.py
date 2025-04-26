@@ -26,31 +26,7 @@ async def ticktick_get_by_id(obj_id: str) -> str:
         return format_response(obj) # Returns None if not found, format_response handles it
     except Exception as e:
         logging.error(f"Failed to get object by ID {obj_id}: {e}", exc_info=True)
-        # Return error but indicate potential not found
         return format_response({"error": f"Failed to get object by ID {obj_id}: {e}", "result": None, "status": "error"})
-
-@mcp.tool()
-@require_client
-async def ticktick_get_by_fields(search: str, **fields: Any) -> str:
-    """
-    Searches for and retrieves **one** TickTick object that matches multiple field conditions.
-    (Agent Usage Guide in docstring)
-    """
-    VALID_SEARCH_TYPES = ['tasks', 'projects', 'tags', 'project_folders']
-    if not isinstance(search, str) or search not in VALID_SEARCH_TYPES:
-         return format_response({"error": f"Invalid input: 'search' must be one of {VALID_SEARCH_TYPES}."})
-    if not fields:
-         return format_response({"error": "Invalid input: At least one field=value pair is required for search fields."})
-
-    try:
-        # IMPORTANT CHANGE: ticktick-py get_by_fields returns a list.
-        obj_list = ticktick_client.get_by_fields(search=search, **fields)
-        # Return the first item if found, otherwise None (format_response handles None -> "null")
-        result = obj_list[0] if obj_list else None
-        return format_response(result)
-    except Exception as e:
-        logging.error(f"Failed to get object by fields ({search}, {fields}): {e}", exc_info=True)
-        return format_response({"error": f"Failed to get object by fields ({search}, {fields}): {e}", "result": None, "status": "error"})
 
 @mcp.tool()
 @require_client

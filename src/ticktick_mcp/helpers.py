@@ -4,11 +4,8 @@ import json
 import logging
 from typing import Any, Dict, List, Optional
 
-# Import the global client instance
-# We need this for the require_client decorator and _get_all_tasks
-from .client import ticktick_client
+from . import client
 
-# Type hints (can be shared or moved to a dedicated types file later if needed)
 TaskObject = Dict[str, Any]
 
 # --- Helper Function --- #
@@ -16,16 +13,13 @@ def format_response(result: Any) -> str:
     """Formats the result from ticktick-py into a JSON string for MCP."""
     if isinstance(result, (dict, list)):
         try:
-            # Use default=str to handle potential datetime objects if any slip through
             return json.dumps(result, indent=2, default=str)
         except TypeError as e:
-            # Log the serialization error
             logging.error(f"Failed to serialize response object: {e} - Object: {result}", exc_info=True)
             return json.dumps({"error": "Failed to serialize response", "details": str(e)})
     elif result is None:
          return json.dumps(None)
     else:
-        # Fallback for unexpected types
         logging.warning(f"Formatting unexpected type: {type(result)} - Value: {result}")
         return json.dumps({"result": str(result)})
 
@@ -34,9 +28,8 @@ def require_client(func):
     """Decorator to check if ticktick_client is initialized before calling the tool."""
     @functools.wraps(func)
     async def wrapper(*args, **kwargs):
-        if not ticktick_client:
-            # Maybe call initialize_ticktick_client() here?
-            # For now, assume it must be initialized beforehand by the main script.
+        logging.info(f"TickTick client: {client.ticktick_client}")
+        if not client.ticktick_client:
             logging.error("TickTick client accessed before initialization in tool function.")
             return format_response({"error": "TickTick client not initialized."})
         return await func(*args, **kwargs)
@@ -45,34 +38,29 @@ def require_client(func):
 # --- Internal Helper to Get All Tasks --- #
 def _get_all_tasks_from_ticktick() -> List[TaskObject]:
     """Internal helper to fetch all *uncompleted* tasks from all projects."""
-    if not ticktick_client:
-        # This case should ideally not be hit if require_client is used properly
-        # But added as a safeguard.
+    if not client.ticktick_client:
         logging.error("_get_all_tasks_from_ticktick called when client is not initialized.")
         raise ConnectionError("TickTick client not initialized.")
 
     all_tasks = []
-    # Access projects directly from the client's state
     try:
-        projects_state = ticktick_client.state.get('projects')
-        if projects_state is None: projects_state = [] # Handle None case
+        projects_state = client.ticktick_client.state.get('projects')
+        if projects_state is None: projects_state = []
     except Exception as e:
         logging.error(f"Error accessing client state for projects: {e}", exc_info=True)
-        projects_state = [] # Default to empty list on error
+        projects_state = []
 
-    # Ensure projects_state is a list
     if not isinstance(projects_state, list):
         logging.warning(f"Expected list of projects in state, got {type(projects_state)}. Fetching inbox tasks only.")
-        projects_state = [] # Reset to empty list if not a list
+        projects_state = []
 
     # Get unique project IDs from state, add inbox ID
     project_ids = {p.get('id') for p in projects_state if isinstance(p, dict) and p.get('id')}
     try:
-        if ticktick_client.inbox_id:
-            project_ids.add(ticktick_client.inbox_id)
+        if client.ticktick_client.inbox_id:
+            project_ids.add(client.ticktick_client.inbox_id)
     except Exception as e:
         logging.error(f"Error accessing client inbox_id: {e}", exc_info=True)
-        # Proceed without inbox if access fails
 
     if not project_ids:
         logging.warning("No project IDs found (including inbox) to fetch tasks from.")
@@ -82,18 +70,16 @@ def _get_all_tasks_from_ticktick() -> List[TaskObject]:
     for project_id in project_ids:
         try:
             # get_from_project fetches *uncompleted* tasks for a project
-            tasks_in_project = ticktick_client.task.get_from_project(project_id)
-            if tasks_in_project: # Can return None or empty list
-                 # Ensure it's a list before extending
+            tasks_in_project = client.ticktick_client.task.get_from_project(project_id)
+            if tasks_in_project:
                  if isinstance(tasks_in_project, list):
                      all_tasks.extend(tasks_in_project)
-                 elif isinstance(tasks_in_project, dict): # Handle single task case
+                 elif isinstance(tasks_in_project, dict):
                      all_tasks.append(tasks_in_project)
                  else:
                     logging.warning(f"Unexpected data type received from get_from_project for {project_id}: {type(tasks_in_project)}")
         except Exception as e:
             logging.warning(f"Failed to get tasks for project {project_id}: {e}")
-            # Continue to next project even if one fails
 
     logging.info(f"Found {len(all_tasks)} total uncompleted tasks.")
     return all_tasks

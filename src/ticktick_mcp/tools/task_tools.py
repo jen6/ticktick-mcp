@@ -1,6 +1,7 @@
 import datetime
 import logging
 from typing import Any, Dict, List, Optional, Union
+from pydantic import BaseModel, Field
 
 # Import the shared MCP instance for the decorator
 from ..mcp_instance import mcp
@@ -12,8 +13,62 @@ from ..helpers import format_response, require_client, _get_all_tasks_from_tickt
 # Type Hints (can be shared or moved)
 TaskId = str
 ProjectId = str
-TaskObject = Dict[str, Any]
+# TaskObject = Dict[str, Any] # Removed old type alias
 ListOfTaskIds = List[TaskId]
+
+# Pydantic Models based on user schema and common TickTick fields
+class SubtaskItem(BaseModel):
+    """Represents a subtask item within a TickTick task."""
+    title: str
+    startDate: Optional[datetime.datetime] = None
+    isAllDay: Optional[bool] = None
+    sortOrder: Optional[int] = None
+    timeZone: Optional[str] = None
+    status: Optional[int] = None # 0 = incomplete, 1 = complete? Check API docs
+    completedTime: Optional[datetime.datetime] = None
+
+    class Config:
+        # Allow population by field name OR alias if needed later
+        # populate_by_name = True
+        pass
+
+class TaskObject(BaseModel):
+    """
+    Represents a TickTick Task.
+    Based on provided schema and common API fields.
+    Note: Date fields expect datetime objects, conversion might be needed
+    at API boundaries if ISO strings are used.
+    """
+    # --- Fields from User Schema ---
+    title: str
+    content: Optional[str] = None
+    desc: Optional[str] = None # Often used interchangeably with content
+    isAllDay: Optional[bool] = Field(None, alias="allDay") # Use schema name, alias for potential API mismatch
+    startDate: Optional[datetime.datetime] = None
+    dueDate: Optional[datetime.datetime] = None
+    timeZone: Optional[str] = None
+    reminders: Optional[List[str]] = None # Structure might be more complex, check API
+    repeatFlag: Optional[str] = Field(None, alias="repeat") # Use schema name, alias for potential API mismatch
+    priority: Optional[int] = 0 # 0: None, 1: Low, 3: Medium, 5: High
+    sortOrder: Optional[int] = None
+    items: Optional[List[SubtaskItem]] = None
+
+    # --- Common Fields from TickTick API ---
+    id: Optional[str] = None # Task ID, usually present in responses/updates
+    projectId: Optional[str] = None # Project ID task belongs to
+    status: Optional[int] = None # 0: incomplete, 2: completed? Check API docs
+    createdTime: Optional[datetime.datetime] = None
+    modifiedTime: Optional[datetime.datetime] = None
+    completedTime: Optional[datetime.datetime] = None
+    tags: Optional[List[str]] = None # List of tag names
+    etag: Optional[str] = None # Entity tag for caching/updates
+
+    class Config:
+        # Allow population by field name OR alias
+        populate_by_name = True
+        # Allow arbitrary types if needed for complex nested structures from API
+        # arbitrary_types_allowed = True
+        pass
 
 # ================== #
 # Task Tools         #

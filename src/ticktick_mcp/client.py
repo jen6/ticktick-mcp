@@ -38,7 +38,7 @@ def initialize_ticktick_client():
 
         logging.info(f"Initializing TickTickClient with username: {USERNAME}")
         ticktick_client = TickTickClient(USERNAME, PASSWORD, auth_client)
-        logging.info("TickTick client initialized successfully.")
+        logging.info(f"TickTick client initialized successfully. {ticktick_client}")
         return ticktick_client
     except Exception as e:
         logging.error(f"Error initializing TickTick client: {e}", exc_info=True) # Log traceback
