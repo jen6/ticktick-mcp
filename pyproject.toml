@@ -7,15 +7,10 @@ name = "ticktick-mcp"
 version = "0.1.0"
 description = "MCP server for interacting with the TickTick API."
 authors = [
-  { name="Your Name", email="you@example.com" }, # 이 부분을 실제 정보로 수정하세요
+  { name="jen6", email="work.jen6@gmail.com" },
 ]
 readme = "README.md"
 requires-python = ">=3.10"
-classifiers = [
-    "Programming Language :: Python :: 3",
-[project.urls]
-    "Operating System :: OS Independent",
-]
 dependencies = [
     "anyio>=4.9.0",
     "mcp>=1.6.0",
@@ -27,4 +22,4 @@ dependencies = [
 ticktick-mcp = "ticktick_mcp:main"
 
 [project.urls]
-"Homepage" = "https://github.com/yourusername/ticktick-mcp"
+"Homepage" = "https://github.com/jen6/ticktick-mcp"
