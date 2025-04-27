@@ -5,10 +5,10 @@ from pydantic import BaseModel, Field
 
 # Import the shared MCP instance for the decorator
 from ..mcp_instance import mcp
-# Import the global client instance
-from ..client import ticktick_client
+# Import the singleton class
+from ..client import TickTickClientSingleton
 # Import helpers
-from ..helpers import format_response, require_client, _get_all_tasks_from_ticktick
+from ..helpers import format_response, require_ticktick_client, _get_all_tasks_from_ticktick, ToolLogicError
 
 # Type Hints (can be shared or moved)
 TaskId = str
@@ -75,36 +75,77 @@ class TaskObject(BaseModel):
 # ================== #
 
 @mcp.tool()
-@require_client
+@require_ticktick_client
 async def ticktick_create_task(
     title: str,
-    projectId: Optional[ProjectId] = None,
+    projectId: Optional[str] = None,
     content: Optional[str] = None,
     desc: Optional[str] = None,
     allDay: Optional[bool] = None,
-    startDate: Optional[str] = None, # Expect ISO format string e.g., "2025-04-26T10:00:00"
-    dueDate: Optional[str] = None,   # Expect ISO format string e.g., "2025-04-27T18:30:00"
+    startDate: Optional[str] = None,  # Expects ISO format string or datetime
+    dueDate: Optional[str] = None,    # Expects ISO format string or datetime
     timeZone: Optional[str] = None,
-    reminders: Optional[List[str]] = None, # e.g., ["TRIGGER:PT0S"]
-    repeat: Optional[str] = None, # e.g., "RRULE:FREQ=DAILY;INTERVAL=1"
-    priority: Optional[int] = None, # 0, 1, 3, 5
+    reminders: Optional[List[str]] = None,
+    repeat: Optional[str] = None,
+    priority: Optional[int] = None,
     sortOrder: Optional[int] = None,
-    items: Optional[List[Dict[str, Any]]] = None # Subtasks [{ "title": "subtask1", "status": 0}]
+    items: Optional[List[Dict]] = None,
 ) -> str:
     """
     Creates a new task in TickTick.
-    (Agent Usage Guide in docstring)
-    """
-    # Convert date strings to datetime objects if provided
-    try:
-        start_dt = datetime.datetime.fromisoformat(startDate) if startDate else None
-        due_dt = datetime.datetime.fromisoformat(dueDate) if dueDate else None
-    except ValueError as e:
-         return format_response({"error": f"Invalid date format for startDate or dueDate: {e}. Use ISO format."})
 
+    Args:
+        title (str): The title of the task.
+        projectId (str, optional): ID of the project to add the task to. Defaults to Inbox.
+        content (str, optional): Additional details or notes for the task.
+        desc (str, optional): Description for checklist items (if any).
+        allDay (bool, optional): Set to True if the task spans the entire day.
+        startDate (str, optional): Start date/time in ISO 8601 format (e.g., '2024-07-26T10:00:00+09:00' or '2024-07-26').
+        dueDate (str, optional): Due date/time in ISO 8601 format.
+        timeZone (str, optional): IANA timezone name (e.g., 'Asia/Seoul'). Defaults to client's timezone.
+        reminders (List[str], optional): List of reminder triggers (e.g., ["TRIGGER:PT0S"] for on-time).
+        repeat (str, optional): Recurring rule (e.g., "RRULE:FREQ=DAILY;INTERVAL=1").
+        priority (int, optional): Task priority (0=None, 1=Low, 3=Medium, 5=High).
+        sortOrder (int, optional): Custom sort order value.
+        items (List[Dict], optional): List of subtask dictionaries (checklists). Each dict needs at least 'title'.
+
+    Returns:
+        A JSON string containing the newly created task object or an error message.
+
+    Example:
+        Creating a simple task:
+        {
+            "title": "Buy Groceries",
+            "priority": 3,
+            "dueDate": "2024-08-01"
+        }
+
+        Creating a task with content and a reminder:
+        {
+            "title": "Team Meeting Prep",
+            "projectId": "project123abc",
+            "content": "Review agenda and prepare slides.",
+            "startDate": "2024-07-27T09:00:00+09:00",
+            "dueDate": "2024-07-27T10:00:00+09:00",
+            "timeZone": "Asia/Seoul",
+            "reminders": ["TRIGGER:PT0S"]
+        }
+    """
+    logging.info(f"Attempting to create task with title: '{title}'")
     try:
+        client = TickTickClientSingleton.get_client()
+        if not client:
+            raise ToolLogicError("TickTick client is not available.")
+
+        # Convert date strings to datetime objects if provided
+        try:
+            start_dt = datetime.datetime.fromisoformat(startDate) if startDate else None
+            due_dt = datetime.datetime.fromisoformat(dueDate) if dueDate else None
+        except ValueError as e:
+             return format_response({"error": f"Invalid date format for startDate or dueDate: {e}. Use ISO format."})
+
         # Use the builder internally to construct the task dictionary
-        task_dict = ticktick_client.task.builder(
+        task_dict = client.task.builder(
             title=title,
             projectId=projectId,
             content=content, # Use content if provided, else desc
@@ -119,36 +160,89 @@ async def ticktick_create_task(
             sortOrder=sortOrder,
             items=items
         )
-        created_task = ticktick_client.task.create(task_dict)
+        created_task = client.task.create(task_dict)
+        logging.info(f"Successfully created task: {created_task.get('id')}")
         return format_response(created_task)
     except Exception as e:
         logging.error(f"Failed to create task '{title}': {e}", exc_info=True)
         return format_response({"error": f"Failed to create task: {e}"})
 
-@mcp.tool()
-@require_client
-async def ticktick_update_task(task_object: TaskObject) -> str:
+@mcp.tool(name="ticktick_update_task") # Explicitly name tool to avoid conflict if class is renamed
+@require_ticktick_client
+async def update_task(
+    task_object: TaskObject # Use the Pydantic model for validation
+) -> str:
     """
-    Updates the content of an existing task.
-    (Agent Usage Guide in docstring)
+    Updates the content of an existing task using its ID.
+
+    Args:
+        task_object: A dictionary representing the task to update. Must include the 'id' field.
+                     Other fields to update should also be included.
+                     Date fields (startDate, dueDate) should be in ISO 8601 format.
+
+    Returns:
+        A JSON string containing the updated task object or an error message.
+
+    Example:
+        Updating a task's title and priority:
+        {
+            "task_object": {
+                "id": "task_id_12345",
+                "title": "Buy Groceries (Updated)",
+                "priority": 5
+            }
+        }
+
+        Changing the due date and adding content:
+        {
+            "task_object": {
+                "id": "task_id_67890",
+                "dueDate": "2024-08-05",
+                "content": "Milk, Eggs, Bread, Apples"
+            }
+        }
     """
     if not isinstance(task_object, dict) or 'id' not in task_object:
          return format_response({"error": "Invalid input: task_object must be a dictionary with an 'id'."})
 
     task_id = task_object.get('id')
+    logging.info(f"Attempting to update task ID: {task_id}")
+
     try:
-        updated_task = ticktick_client.task.update(task_object)
+        client = TickTickClientSingleton.get_client()
+        if not client:
+            raise ToolLogicError("TickTick client is not available.")
+
+        # The library expects the full task dictionary for update
+        updated_task = client.task.update(task_object)
+        logging.info(f"Successfully updated task ID: {task_id}")
         return format_response(updated_task)
     except Exception as e:
         logging.error(f"Failed to update task {task_id}: {e}", exc_info=True)
         return format_response({"error": f"Failed to update task {task_id}: {e}"})
 
 @mcp.tool()
-@require_client
-async def ticktick_delete_tasks(task_ids: Union[TaskId, ListOfTaskIds]) -> str:
+@require_ticktick_client
+async def ticktick_delete_tasks(task_ids: Union[str, List[str]]) -> str:
     """
     Deletes one or more tasks using their IDs.
-    (Agent Usage Guide in docstring)
+
+    Args:
+        task_ids: A single task ID string or a list of task ID strings.
+
+    Returns:
+        A JSON string indicating success or failure, potentially listing deleted IDs or errors.
+
+    Example:
+        Deleting a single task:
+        {
+            "task_ids": "task_id_to_delete_123"
+        }
+
+        Deleting multiple tasks:
+        {
+            "task_ids": ["task_id_abc", "task_id_def", "task_id_ghi"]
+        }
     """
     tasks_to_delete = []
     ids_to_process = task_ids if isinstance(task_ids, list) else [task_ids]
@@ -163,7 +257,7 @@ async def ticktick_delete_tasks(task_ids: Union[TaskId, ListOfTaskIds]) -> str:
         invalid_ids = [] # Track IDs that returned an object but wasn't a task
         for tid in ids_to_process:
             # Using the client's generic get_by_id
-            obj = ticktick_client.get_by_id(tid)
+            obj = client.get_by_id(tid)
             # Check if it looks like a task object (has projectId and title)
             if obj and isinstance(obj, dict) and obj.get('projectId') and obj.get('title') is not None:
                 tasks_to_delete.append(obj)
@@ -197,7 +291,7 @@ async def ticktick_delete_tasks(task_ids: Union[TaskId, ListOfTaskIds]) -> str:
         input_is_single = isinstance(task_ids, str)
         delete_input = tasks_to_delete[0] if input_is_single else tasks_to_delete
 
-        deleted_result = ticktick_client.task.delete(delete_input)
+        deleted_result = client.task.delete(delete_input)
 
         response_data = {
             "status": "success",
@@ -217,17 +311,30 @@ async def ticktick_delete_tasks(task_ids: Union[TaskId, ListOfTaskIds]) -> str:
         return format_response({"error": f"Failed to delete tasks {task_ids}: {e}", "status": "error"})
 
 @mcp.tool()
-@require_client
-async def ticktick_get_tasks_from_project(project_id: ProjectId) -> str:
+@require_ticktick_client
+async def ticktick_get_tasks_from_project(project_id: str) -> str:
     """
     Retrieves a list of all *uncompleted* tasks belonging to a specific project ID.
-    (Agent Usage Guide in docstring)
+
+    Args:
+        project_id: The ID string of the project.
+
+    Returns:
+        A JSON string containing a list of uncompleted task objects in that project, or an error message.
+
+    Example:
+        {
+            "project_id": "project_work_456"
+        }
     """
     if not isinstance(project_id, str):
          return format_response({"error": "Invalid input: project_id must be a string."})
 
     try:
-        tasks = ticktick_client.task.get_from_project(project_id)
+        client = TickTickClientSingleton.get_client()
+        if not client:
+            raise ToolLogicError("TickTick client is not available.")
+        tasks = client.task.get_from_project(project_id)
         # Ensure result is a list even if API returns None or single dict
         if tasks is None:
              tasks = []
@@ -239,25 +346,38 @@ async def ticktick_get_tasks_from_project(project_id: ProjectId) -> str:
         return format_response({"error": f"Failed to get tasks from project {project_id}: {e}"})
 
 @mcp.tool()
-@require_client
-async def ticktick_complete_task(task_id: TaskId) -> str:
+@require_ticktick_client
+async def ticktick_complete_task(task_id: str) -> str:
     """
     Marks a specific task as complete using its ID.
-    (Agent Usage Guide in docstring)
+
+    Args:
+        task_id: The ID string of the task to mark as complete.
+
+    Returns:
+        A JSON string containing the completed task object or an error message.
+
+    Example:
+        {
+            "task_id": "task_to_complete_789"
+        }
     """
     if not isinstance(task_id, str):
          return format_response({"error": "Invalid input: task_id must be a string."})
 
     try:
+        client = TickTickClientSingleton.get_client()
+        if not client:
+            raise ToolLogicError("TickTick client is not available.")
         # Need to fetch the task object first
-        task_obj = ticktick_client.get_by_id(task_id)
+        task_obj = client.get_by_id(task_id)
         if not task_obj or not isinstance(task_obj, dict) or not task_obj.get('projectId'):
             return format_response({"error": f"Task with ID {task_id} not found or invalid.", "status": "not_found"})
 
-        completed_task_result = ticktick_client.task.complete(task_obj)
+        completed_task_result = client.task.complete(task_obj)
         # The method might return the original task or result object.
         # Fetch again to confirm status change and return the updated object.
-        updated_task_obj = ticktick_client.get_by_id(task_id)
+        updated_task_obj = client.get_by_id(task_id)
         if updated_task_obj and isinstance(updated_task_obj, dict) and updated_task_obj.get('status', 0) != 0:
              return format_response(updated_task_obj)
         else:
@@ -270,29 +390,44 @@ async def ticktick_complete_task(task_id: TaskId) -> str:
         return format_response({"error": f"Failed to complete task {task_id}: {e}"})
 
 @mcp.tool()
-@require_client
-async def ticktick_move_task(task_id: TaskId, new_project_id: ProjectId) -> str:
+@require_ticktick_client
+async def ticktick_move_task(task_id: str, new_project_id: str) -> str:
     """
     Moves a specific task to a different project.
-    (Agent Usage Guide in docstring)
+
+    Args:
+        task_id: The ID string of the task to move.
+        new_project_id: The ID string of the destination project.
+
+    Returns:
+        A JSON string indicating success or failure, potentially containing the moved task object.
+
+    Example:
+        {
+            "task_id": "task_xyz_111",
+            "new_project_id": "project_personal_222"
+        }
     """
     if not isinstance(task_id, str) or not isinstance(new_project_id, str):
          return format_response({"error": "Invalid input: task_id and new_project_id must be strings."})
 
     try:
+        client = TickTickClientSingleton.get_client()
+        if not client:
+            raise ToolLogicError("TickTick client is not available.")
         # Need to fetch the task object first
-        task_obj = ticktick_client.get_by_id(task_id)
+        task_obj = client.get_by_id(task_id)
         if not task_obj or not isinstance(task_obj, dict) or not task_obj.get('projectId'):
             return format_response({"error": f"Task with ID {task_id} not found or invalid.", "status": "not_found"})
 
         # Check if the target project exists? (Optional, API might handle it)
-        target_proj = ticktick_client.get_by_id(new_project_id)
+        target_proj = client.get_by_id(new_project_id)
         if not target_proj or not isinstance(target_proj, dict) or target_proj.get('id') != new_project_id:
             logging.warning(f"Target project {new_project_id} for moving task {task_id} not found or invalid.")
             # Allow the move attempt anyway, the API might handle this case.
             # return format_response({"error": f"Target project with ID {new_project_id} not found or invalid.", "status": "not_found"})
 
-        moved_task = ticktick_client.task.move(task_obj, new_project_id)
+        moved_task = client.task.move(task_obj, new_project_id)
         # Fetch again to confirm project ID change? API response might be sufficient.
         return format_response(moved_task)
     except Exception as e:
@@ -300,11 +435,23 @@ async def ticktick_move_task(task_id: TaskId, new_project_id: ProjectId) -> str:
         return format_response({"error": f"Failed to move task {task_id} to project {new_project_id}: {e}"})
 
 @mcp.tool()
-@require_client
-async def ticktick_make_subtask(child_task_id: TaskId, parent_task_id: TaskId) -> str:
+@require_ticktick_client
+async def ticktick_make_subtask(parent_task_id: str, child_task_id: str) -> str:
     """
     Makes one task (child) a subtask of another task (parent).
-    (Agent Usage Guide in docstring)
+
+    Args:
+        parent_task_id: The ID string of the task that will become the parent.
+        child_task_id: The ID string of the task that will become the subtask.
+
+    Returns:
+        A JSON string indicating success or failure.
+
+    Example:
+        {
+            "parent_task_id": "parent_task_id_main",
+            "child_task_id": "child_task_id_sub1"
+        }
     """
     if not isinstance(child_task_id, str) or not isinstance(parent_task_id, str):
          return format_response({"error": "Invalid input: child_task_id and parent_task_id must be strings."})
@@ -313,12 +460,15 @@ async def ticktick_make_subtask(child_task_id: TaskId, parent_task_id: TaskId) -
          return format_response({"error": "Child and parent task IDs cannot be the same."})
 
     try:
+        client = TickTickClientSingleton.get_client()
+        if not client:
+            raise ToolLogicError("TickTick client is not available.")
         # Need to fetch both task objects
-        child_task_obj = ticktick_client.get_by_id(child_task_id)
+        child_task_obj = client.get_by_id(child_task_id)
         if not child_task_obj or not isinstance(child_task_obj, dict) or not child_task_obj.get('projectId'):
             return format_response({"error": f"Child task with ID {child_task_id} not found or invalid.", "status": "not_found"})
 
-        parent_task_obj = ticktick_client.get_by_id(parent_task_id)
+        parent_task_obj = client.get_by_id(parent_task_id)
         if not parent_task_obj or not isinstance(parent_task_obj, dict) or not parent_task_obj.get('projectId'):
             return format_response({"error": f"Parent task with ID {parent_task_id} not found or invalid.", "status": "not_found"})
 
@@ -331,10 +481,10 @@ async def ticktick_make_subtask(child_task_id: TaskId, parent_task_id: TaskId) -
             })
 
         # The API call uses the child object and the parent ID string
-        result_subtask = ticktick_client.task.make_subtask(child_task_obj, parent_task_id)
+        result_subtask = client.task.make_subtask(child_task_obj, parent_task_id)
 
         # Fetch parent task again to show updated subtasks/structure in the response
-        updated_parent_task_obj = ticktick_client.get_by_id(parent_task_id)
+        updated_parent_task_obj = client.get_by_id(parent_task_id)
 
         return format_response({
              "message": f"Task {child_task_id} successfully made a subtask of {parent_task_id}.",

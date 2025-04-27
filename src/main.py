@@ -2,6 +2,7 @@
 
 import sys
 import logging
+import uvicorn
 
 from ticktick_mcp import config
 
@@ -9,8 +10,8 @@ from ticktick_mcp import config
 # Import the MCP instance
 from ticktick_mcp.mcp_instance import mcp
 
-# Import the client initializer
-from ticktick_mcp.client import initialize_ticktick_client
+# TickTick Client Initialization (using the new singleton)
+from ticktick_mcp.client import TickTickClientSingleton
 
 # --- Tool Registration --- #
 # Import tool modules AFTER mcp instance is created.
@@ -25,21 +26,7 @@ logging.info("Tool registration complete.")
 
 # --- Main Execution Logic --- #
 def main():
-    logging.info("Initializing TickTick MCP Server...")
-    # Initialize the TickTick client (this might involve OAuth flow on first run)
-    client_instance = initialize_ticktick_client()
-
-    if client_instance:
-        logging.info("TickTick client ready. Starting MCP server on stdio...")
-        # Run the MCP server using stdio transport
-        try:
-            mcp.run(transport="stdio")
-        except Exception as e:
-            logging.critical(f"MCP server encountered a critical error: {e}", exc_info=True)
-            sys.exit(1)
-    else:
-        logging.error("MCP Server cannot start due to TickTick client initialization failure.")
-        sys.exit(1)
+    mcp.run(transport="stdio")
 
 # --- Script Entry Point --- #
 if __name__ == "__main__":

@@ -4,9 +4,13 @@ import json
 import logging
 from typing import Any, Dict, List, Optional
 
-from . import client
+from .client import TickTickClientSingleton
 
 TaskObject = Dict[str, Any]
+
+# Define the ToolLogicError exception
+class ToolLogicError(Exception):
+    pass
 
 # --- Helper Function --- #
 def format_response(result: Any) -> str:
@@ -24,27 +28,33 @@ def format_response(result: Any) -> str:
         return json.dumps({"result": str(result)})
 
 # --- Decorator for Client Check --- #
-def require_client(func):
+def require_ticktick_client(func):
     """Decorator to check if ticktick_client is initialized before calling the tool."""
     @functools.wraps(func)
     async def wrapper(*args, **kwargs):
-        logging.info(f"TickTick client: {client.ticktick_client}")
-        if not client.ticktick_client:
-            logging.error("TickTick client accessed before initialization in tool function.")
-            return format_response({"error": "TickTick client not initialized."})
+        # Get the client instance using the singleton's getter method
+        ticktick_client = TickTickClientSingleton.get_client()
+        if not ticktick_client:
+            logging.error("TickTick client is not initialized. Cannot execute tool.")
+            # Consider how to communicate this back to the MCP framework/user
+            # Maybe raise a specific exception or return an error structure
+            # For now, returning an error message in a dict format similar to tool outputs
+            return json.dumps({"error": "TickTick client not initialized. Please check credentials and restart."})
+        # If client exists, proceed with the original function call
+        # Original function will now get the client via TickTickClientSingleton.get_client() itself
         return await func(*args, **kwargs)
     return wrapper
 
 # --- Internal Helper to Get All Tasks --- #
 def _get_all_tasks_from_ticktick() -> List[TaskObject]:
     """Internal helper to fetch all *uncompleted* tasks from all projects."""
-    if not client.ticktick_client:
+    if not TickTickClientSingleton.get_client():
         logging.error("_get_all_tasks_from_ticktick called when client is not initialized.")
         raise ConnectionError("TickTick client not initialized.")
 
     all_tasks = []
     try:
-        projects_state = client.ticktick_client.state.get('projects', [])
+        projects_state = TickTickClientSingleton.get_client().state.get('projects', [])
     except Exception as e:
         logging.error(f"Error accessing client state for projects: {e}", exc_info=True)
         projects_state = []
@@ -52,8 +62,8 @@ def _get_all_tasks_from_ticktick() -> List[TaskObject]:
     # Get unique project IDs from state, add inbox ID
     project_ids = {p.get('id') for p in projects_state if p.get('id')}
     try:
-        if client.ticktick_client.inbox_id:
-            project_ids.add(client.ticktick_client.inbox_id)
+        if TickTickClientSingleton.get_client().inbox_id:
+            project_ids.add(TickTickClientSingleton.get_client().inbox_id)
     except Exception as e:
         logging.error(f"Error accessing client inbox_id: {e}", exc_info=True)
 
@@ -61,7 +71,7 @@ def _get_all_tasks_from_ticktick() -> List[TaskObject]:
     for project_id in project_ids:
         try:
             # get_from_project fetches *uncompleted* tasks for a project
-            tasks_in_project = client.ticktick_client.task.get_from_project(project_id)
+            tasks_in_project = TickTickClientSingleton.get_client().task.get_from_project(project_id)
             if tasks_in_project:
                  if isinstance(tasks_in_project, list):
                      all_tasks.extend(tasks_in_project)

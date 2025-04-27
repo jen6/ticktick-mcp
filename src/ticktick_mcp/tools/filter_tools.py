@@ -8,10 +8,10 @@ from pydantic import BaseModel, Field, validator
 # Import the shared MCP instance for the decorator
 from ..mcp_instance import mcp
 # Import the global client instance
-from ..client import ticktick_client
+from ..client import TickTickClientSingleton
 # Import helpers
 from ..helpers import (
-    format_response, require_client,
+    format_response, require_ticktick_client,
     _get_all_tasks_from_ticktick
 )
 
@@ -198,7 +198,11 @@ class TaskFilterer:
                 # ticktick-py get_completed takes datetime objects, not strings
                 # Let's pass the datetime objects directly
                 # It handles timezone conversion internally based on client settings
-                tasks = await ticktick_client.task.get_completed(
+                client = TickTickClientSingleton.get_client()
+                if not client:
+                    raise ConnectionError("TickTick client is not available.")
+
+                tasks = await client.task.get_completed(
                     from_date=start_dt, # Use datetime object
                     to_date=end_dt,     # Use datetime object
                     # Removed tz argument as client handles it
@@ -345,7 +349,7 @@ def _build_property_filter(
 # ================================= #
 
 @mcp.tool()
-@require_client
+@require_ticktick_client
 async def ticktick_filter_tasks(
     filter_criteria: Dict[str, Any]
 ) -> str:
