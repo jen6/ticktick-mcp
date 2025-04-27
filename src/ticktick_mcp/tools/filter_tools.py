@@ -70,9 +70,11 @@ class PeriodFilter(BaseModel):
         compare_start_date = self.start_date.date() if self.start_date else None
         compare_end_date = self.end_date.date() if self.end_date else None
 
+        logging.info(f"Comparing task date {compare_task_date} with start date {compare_start_date} and end date {compare_end_date}")
         if compare_start_date and compare_task_date < compare_start_date:
             return False
 
+        logging.info(f"Comparing task date {compare_task_date} with end date {compare_end_date}")
         if compare_end_date and compare_task_date > compare_end_date:
             return False
 
@@ -249,6 +251,8 @@ class TaskFilterer:
         )
 
         # 2. Filter Tasks using the comprehensive property_filter
+        logging.info(f"{property_filter.status} tasks:")
+        logging.info(f"Filtering {len(tasks)} fetched tasks with property filter: {property_filter}")
         filtered_tasks = [t for t in tasks if property_filter.matches(t)]
         logging.info(f"Filtered {len(tasks)} fetched tasks down to {len(filtered_tasks)} matching criteria.")
 
@@ -312,24 +316,17 @@ def _build_property_filter(
             # Continue without tz_info
 
     # Build Period Filters
-    due_filter = None
-    if due_start_date or due_end_date:
-        due_filter = PeriodFilter(
-            start_date=due_start_date,
-            end_date=due_end_date,
-            tz=tz_info
-        )
+    due_filter = PeriodFilter(
+        start_date=due_start_date,
+        end_date=due_end_date,
+        tz=tz_info
+    )
 
-    completion_filter = None
-    if completion_start_date or completion_end_date:
-         if status != 'completed':
-              logging.warning("Completion date filter provided but status is not 'completed'. Ignoring completion dates.")
-         else:
-            completion_filter = PeriodFilter(
-                start_date=completion_start_date,
-                end_date=completion_end_date,
-                tz=tz_info
-            )
+    completion_filter = PeriodFilter(
+        start_date=completion_start_date,
+        end_date=completion_end_date,
+        tz=tz_info
+    )
 
     # Build Property Filter
     property_filter = PropertyFilter(
@@ -337,8 +334,8 @@ def _build_property_filter(
         project_id=project_id,
         tag_label=tag_label,
         priority=priority,
-        due_date_filter=due_filter if status == 'uncompleted' else None,
-        completion_date_filter=completion_filter if status == 'completed' else None
+        due_date_filter=due_filter,
+        completion_date_filter=completion_filter,
     )
 
     return property_filter, tz_info, sort_by_priority
@@ -376,7 +373,7 @@ async def ticktick_filter_tasks(
         - Error: {"error": "Error message describing what went wrong", "status": "error"}
 
     Limitations:
-        - Date filters require proper ISO 8601 format (YYYY-MM-DD or YYYY-MM-DDTHH:MM:SS+TIMEZONE)
+        - Date filters require proper ISO 8601 format (YYYY-MM-DD or YYYY-MM-DDTHH:MM:SS+TIMEZONE).
         - Completion date filters only work when status is set to 'completed'
         - Filtering by multiple tags in a single query is not supported
         - For complex filtering needs, you may need to perform multiple queries and combine results
@@ -425,6 +422,7 @@ async def ticktick_filter_tasks(
     Agent Usage Guide:
         - This is the most versatile tool for finding tasks based on specific criteria
         - Always specify a timezone (tz) when using date filters to ensure correct interpretation
+        - Use ticktick_convert_datetime_to_ticktick_format to convert datetime objects to the correct format
         - For date ranges, use both start and end dates (e.g., due_start_date and due_end_date)
         - When status is 'completed', you MUST include at least one completion date filter
         - Map natural language date references to ISO format dates:
