@@ -1,7 +1,7 @@
 import datetime
 import json
 import logging
-from typing import Optional, List, Dict, Any, Union, Literal, Tuple, Annotated
+from typing import Optional, List, Dict, Any, Union, Literal, Tuple
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from pydantic import BaseModel, Field, validator
 
@@ -264,32 +264,56 @@ class TaskFilterer:
 # --- Helper Function to Build Filter --- #
 
 def _build_property_filter(
-    status: TaskStatus,
-    project_id: Optional[str],
-    tag_label: Optional[TagLabel],
-    priority: Optional[int],
-    due_start_date: Optional[str],
-    due_end_date: Optional[str],
-    completion_start_date: Optional[str],
-    completion_end_date: Optional[str],
-    tz: Optional[str]
-) -> Tuple[PropertyFilter, Optional[ZoneInfo]]:
-    """Constructs PeriodFilter and PropertyFilter objects from raw arguments."""
+    filter_criteria: Union[str, Dict[str, Any]]
+) -> Tuple[PropertyFilter, Optional[ZoneInfo], bool]:
+    """Constructs PeriodFilter, PropertyFilter objects, and extracts sort flag from raw filter criteria."""
+    criteria: Dict[str, Any] = {}
+
+    # Parse filter_criteria if it's a string
+    if isinstance(filter_criteria, str):
+        try:
+            criteria = json.loads(filter_criteria)
+        except json.JSONDecodeError as e:
+            logging.error(f"Invalid JSON string provided for filter_criteria: {e}")
+            # Re-raise as ValueError to be caught by the main tool function
+            raise ValueError(f"Invalid JSON string provided: {e}") from e
+    elif isinstance(filter_criteria, dict):
+        criteria = filter_criteria
+    else:
+        raise ValueError("filter_criteria must be a JSON string or a dictionary")
+
+    # Extract parameters from the criteria dictionary
+    status = criteria.get("status", "uncompleted")
+    project_id = criteria.get("project_id")
+    tag_label = criteria.get("tag_label")
+    priority = criteria.get("priority")
+    due_start_date = criteria.get("due_start_date")
+    due_end_date = criteria.get("due_end_date")
+    completion_start_date = criteria.get("completion_start_date")
+    completion_end_date = criteria.get("completion_end_date")
+    sort_by_priority = criteria.get("sort_by_priority", False)
+    tz = criteria.get("tz")
+
+    # Validate status type
+    if status not in ["uncompleted", "completed"]:
+        raise ValueError("Invalid status value. Must be 'uncompleted' or 'completed'.")
+
+    # Build ZoneInfo
     tz_info: Optional[ZoneInfo] = None
     if tz:
         try:
             tz_info = ZoneInfo(tz)
         except ZoneInfoNotFoundError:
             logging.warning(f"Invalid timezone '{tz}' provided. Using local time.")
-            # Optionally raise an error or handle differently
-            # raise ValueError(f"Invalid timezone: {tz}")
+            # Continue without tz_info
 
+    # Build Period Filters
     due_filter = None
     if due_start_date or due_end_date:
         due_filter = PeriodFilter(
-            start_date=due_start_date, # Pass string directly, validator handles it
-            end_date=due_end_date,     # Pass string directly, validator handles it
-            tz=tz_info                 # Pass ZoneInfo object
+            start_date=due_start_date,
+            end_date=due_end_date,
+            tz=tz_info
         )
 
     completion_filter = None
@@ -298,21 +322,22 @@ def _build_property_filter(
               logging.warning("Completion date filter provided but status is not 'completed'. Ignoring completion dates.")
          else:
             completion_filter = PeriodFilter(
-                start_date=completion_start_date, # Pass string directly
-                end_date=completion_end_date,     # Pass string directly
-                tz=tz_info                         # Pass ZoneInfo object
+                start_date=completion_start_date,
+                end_date=completion_end_date,
+                tz=tz_info
             )
 
+    # Build Property Filter
     property_filter = PropertyFilter(
         status=status,
         project_id=project_id,
         tag_label=tag_label,
         priority=priority,
-        due_date_filter=due_filter if status == 'uncompleted' else None, # Only apply if status is uncompleted
-        completion_date_filter=completion_filter if status == 'completed' else None # Only apply if status is completed
+        due_date_filter=due_filter if status == 'uncompleted' else None,
+        completion_date_filter=completion_filter if status == 'completed' else None
     )
 
-    return property_filter, tz_info
+    return property_filter, tz_info, sort_by_priority
 
 
 # ================================= #
@@ -322,32 +347,31 @@ def _build_property_filter(
 @mcp.tool()
 @require_client
 async def ticktick_filter_tasks(
-    status: TaskStatus = "uncompleted",
-    project_id: Optional[str] = None,
-    tag_label: Optional[TagLabel] = None,
-    priority: Optional[int] = None,
-    due_start_date: Annotated[Optional[str], Field(description="Optional start date/time (ISO format) for filtering uncompleted tasks by due date.")] = None,
-    due_end_date: Annotated[Optional[str], Field(description="Optional end date/time (ISO format) for filtering uncompleted tasks by due date.")] = None,
-    completion_start_date: Annotated[Optional[str], Field(description="Optional start date/time (ISO format) for filtering completed tasks by completion date.")] = None,
-    completion_end_date: Annotated[Optional[str], Field(description="Optional end date/time (ISO format) for filtering completed tasks by completion date.")] = None,
-    sort_by_priority: bool = False,
-    tz: Annotated[Optional[str], Field(description="Optional timezone name (e.g., 'America/New_York')")] = None
+    filter_criteria: Dict[str, Any]
 ) -> str:
     """
-    Filters TickTick tasks based on specified criteria and returns a list of matching tasks.
+    Filters TickTick tasks based on specified criteria provided as a JSON string or dictionary,
+    and returns a list of matching tasks as a JSON string.
 
     Args:
-        status: Task status to filter by ('uncompleted' or 'completed'). Defaults to 'uncompleted'.
-        project_id: Optional project ID string to filter by.
-        tag_label: Optional tag name string to filter by.
-        priority: Optional priority level (0=None, 1=Low, 3=Medium, 5=High) to filter by.
-        due_start_date: Optional start date/time (ISO format like 'YYYY-MM-DD' or 'YYYY-MM-DDTHH:MM:SS') for filtering uncompleted tasks by due date.
-        due_end_date: Optional end date/time (ISO format) for filtering uncompleted tasks by due date.
-        completion_start_date: Optional start date/time (ISO format) for filtering completed tasks by completion date. Requires status='completed'.
-        completion_end_date: Optional end date/time (ISO format) for filtering completed tasks by completion date. Requires status='completed'.
-        sort_by_priority: If True, sorts the results by priority (highest first). Defaults to False.
-        tz: Optional timezone name (e.g., 'America/New_York', 'Europe/London', 'Asia/Seoul') for interpreting date/time strings. Uses local system time if not provided.
-
+        filter_criteria: A JSON dictionary containing filter parameters.
+            Expected keys:
+            - status (str): Task status ('uncompleted' or 'completed'). Defaults to 'uncompleted'.
+            - project_id (str, optional): Project ID to filter by.
+            - tag_label (str, optional): Tag name to filter by.
+            - priority (int, optional): Priority level (0=None, 1=Low, 3=Medium, 5=High).
+            - due_start_date (str, optional): ISO format start date/time for due date filter.
+            - due_end_date (str, optional): ISO format end date/time for due date filter.
+            - completion_start_date (str, optional): ISO format start date/time for completion date filter (requires status='completed').
+            - completion_end_date (str, optional): ISO format end date/time for completion date filter (requires status='completed').
+            - sort_by_priority (bool, optional): Sort results by priority (descending). Defaults to False.
+            - tz (str, optional): Timezone name (e.g., 'America/New_York') for date interpretation.
+    Example:
+        {
+            "status": "uncompleted",
+            "due_end_date": "2024-01-31",
+            "tz": "Asia/Seoul"
+        }
     Returns:
         A JSON string representing a list of task objects matching the filter criteria,
         or a JSON object with an error message.
@@ -355,24 +379,14 @@ async def ticktick_filter_tasks(
     filterer = TaskFilterer()
 
     try:
-        # Build the filter objects using the helper function
-        property_filter, tz_info = _build_property_filter(
-            status=status,
-            project_id=project_id,
-            tag_label=tag_label,
-            priority=priority,
-            due_start_date=due_start_date,
-            due_end_date=due_end_date,
-            completion_start_date=completion_start_date,
-            completion_end_date=completion_end_date,
-            tz=tz
-        )
+        # Build the filter objects and get sort flag using the helper function
+        property_filter, tz_info, sort_by_priority = _build_property_filter(filter_criteria)
 
         # Execute the filter
         result = await filterer.filter(
             property_filter=property_filter,
-            sort_by_priority=sort_by_priority,
-            tz_info=tz_info # Pass ZoneInfo to filterer
+            sort_by_priority=sort_by_priority, # Use value from helper
+            tz_info=tz_info
         )
 
         # Format success response
@@ -384,7 +398,7 @@ async def ticktick_filter_tasks(
     except Exception as e:
         # Detailed error logging for unexpected issues
         logging.error(
-            f"Unexpected error in ticktick_filter_tasks tool: status={status}, project={project_id}, tag={tag_label}, priority={priority}, due_start={due_start_date}, due_end={due_end_date}, comp_start={completion_start_date}, comp_end={completion_end_date}, sort={sort_by_priority}, tz={tz}: {e}",
+            f"Unexpected error in ticktick_filter_tasks tool: filter_criteria={filter_criteria}: {e}",
             exc_info=True
         )
         return format_response({"error": f"Failed to filter tasks due to unexpected error: {e}", "status": "error"})
