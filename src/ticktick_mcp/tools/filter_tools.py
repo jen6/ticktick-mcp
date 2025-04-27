@@ -1,7 +1,7 @@
 import datetime
 import json
 import logging
-from typing import Optional, List, Dict, Any, Union, Literal
+from typing import Optional, List, Dict, Any, Union, Literal, Tuple, Annotated
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from pydantic import BaseModel, Field, validator
 
@@ -87,14 +87,21 @@ class PeriodFilter(BaseModel):
                       dt = datetime.datetime.fromisoformat(date_str.replace(".000", ""))
                  except ValueError:
                       logging.warning(f"Could not parse task date '{date_str}' with fromisoformat, trying without offset.")
-                      dt = datetime.datetime.fromisoformat(date_str.split('+')[0].split('Z')[0].replace(".000", ""))
+                      # Try parsing without timezone if fromisoformat fails with it
+                      dt_str_no_offset = date_str.split('+')[0].split('Z')[0].replace(".000", "")
+                      dt = datetime.datetime.fromisoformat(dt_str_no_offset)
 
             else:
                 date_only = datetime.date.fromisoformat(date_str)
                 dt = datetime.datetime.combine(date_only, datetime.time.min)
 
+            # Apply filter's timezone if task date is naive
             if self.tz and dt.tzinfo is None:
                  dt = self.tz.localize(dt)
+            # Convert task's timezone to filter's timezone if both exist
+            elif self.tz and dt.tzinfo is not None:
+                 dt = dt.astimezone(self.tz)
+            # If no filter timezone, make task date naive (use system's local time)
             elif not self.tz and dt.tzinfo is not None:
                  dt = dt.astimezone(None).replace(tzinfo=None)
 
@@ -114,9 +121,9 @@ class PropertyFilter(BaseModel):
         due_date_filter: Optional PeriodFilter object for uncompleted tasks.
         completion_date_filter: Optional PeriodFilter object for completed tasks.
     """
-    tag_label: Optional[str] = Field(None, description="Filter tasks by specific tag")
+    tag_label: Optional[TagLabel] = Field(None, description="Filter tasks by specific tag")
     project_id: Optional[str] = Field(None, description="Filter tasks by project ID")
-    priority: Optional[int] = Field(None, description="Filter tasks by priority level")
+    priority: Optional[int] = Field(None, description="Filter tasks by priority level (0=None, 1=Low, 3=Medium, 5=High)")
     due_date_filter: Optional[PeriodFilter] = Field(None, description="Filter for task due dates")
     completion_date_filter: Optional[PeriodFilter] = Field(None, description="Filter for task completion dates")
     status: TaskStatus = Field("uncompleted", description="Task status to filter by (uncompleted or completed)")
@@ -131,15 +138,25 @@ class PropertyFilter(BaseModel):
         if self.priority is not None and task.get('priority') != self.priority:
             return False
 
-        if self.status == 'uncompleted' and self.due_date_filter:
+        # Check status match AFTER property checks
+        task_status_value = task.get('status', 0) # 0=uncompleted, 2=completed in TickTick API
+        task_is_completed = task_status_value == 2
+        filter_wants_completed = self.status == 'completed'
+
+        if filter_wants_completed != task_is_completed:
+             # If the basic status doesn't match, no need to check dates
+             return False
+
+        # Now check date filters based on the *matched* status
+        if not task_is_completed and self.due_date_filter: # Uncompleted task, check due date
             task_due_date = task.get("dueDate")
             if not self.due_date_filter.contains(task_due_date):
                 return False
-
-        elif self.status == 'completed' and self.completion_date_filter:
-            if not self.completion_date_filter.contains(task.get("completedTime")): 
+        elif task_is_completed and self.completion_date_filter: # Completed task, check completion date
+            if not self.completion_date_filter.contains(task.get("completedTime")):
                 return False
-                
+
+        # All relevant checks passed
         return True
 
 class TaskFilterer:
@@ -149,7 +166,7 @@ class TaskFilterer:
         self,
         status: TaskStatus,
         completion_date_filter: Optional[PeriodFilter], # Pass the filter object
-        tz: Optional[str] # Keep tz for get_completed
+        tz_info: Optional[ZoneInfo] # Use ZoneInfo object
     ) -> List[TaskDict]:
         """Fetches tasks based on status and completion date filters."""
 
@@ -170,23 +187,33 @@ class TaskFilterer:
                 start_dt = completion_date_filter.start_date
                 end_dt = completion_date_filter.end_date
 
-                # Convert to required format if necessary (e.g., YYYY-MM-DD string)
+                # Convert to required format (YYYY-MM-DD string), potentially adjusting for timezone
+                # The client expects dates relative to the user's *account* timezone.
+                # For simplicity here, we'll format based on the provided tz_info.
+                # If tz_info is None, use the date as is (assuming local time).
                 start_arg = start_dt.strftime('%Y-%m-%d') if start_dt else None
                 end_arg = end_dt.strftime('%Y-%m-%d') if end_dt else None
 
+
+                # ticktick-py get_completed takes datetime objects, not strings
+                # Let's pass the datetime objects directly
+                # It handles timezone conversion internally based on client settings
                 tasks = await ticktick_client.task.get_completed(
-                    startDay=start_arg, # Assuming client uses 'startDay', 'endDay'
-                    endDay=end_arg,
-                    # 'full' param might be related to include_time logic, TBD based on client details
-                    # tz=tz # Pass timezone if client supports it
+                    from_date=start_dt, # Use datetime object
+                    to_date=end_dt,     # Use datetime object
+                    # Removed tz argument as client handles it
                 )
 
-                logging.debug(f"Retrieved {len(tasks)} completed tasks in date range")
-                # Filter further by time component if needed, as get_completed might only filter by day
-                if completion_date_filter.contains(tasks[0].get("completedTime")):
-                     tasks = [t for t in tasks if completion_date_filter.contains(t.get("completedTime"))]
-                     logging.debug(f"Filtered down to {len(tasks)} completed tasks matching time component")
-                return tasks
+                logging.debug(f"Retrieved {len(tasks)} completed tasks in date range from API")
+
+                # Re-apply the period filter for precise time matching if needed
+                # (API might only filter by day)
+                precise_filtered_tasks = [t for t in tasks if completion_date_filter.contains(t.get("completedTime"))]
+
+                if len(precise_filtered_tasks) < len(tasks):
+                    logging.debug(f"Filtered down to {len(precise_filtered_tasks)} completed tasks matching time component using PeriodFilter")
+
+                return precise_filtered_tasks
 
             except Exception as e: # Catch broader exceptions from API call
                 logging.error(f"Error fetching completed tasks: {e}", exc_info=True)
@@ -203,23 +230,18 @@ class TaskFilterer:
         self,
         property_filter: PropertyFilter, # Pass the unified filter object
         sort_by_priority: bool,
-        # Remove parameters now handled by PropertyFilter/PeriodFilter
-        # status is in property_filter
-        # filters_json is parsed before creating property_filter
-        # date ranges are in property_filter.due_date_filter/completion_date_filter
-        # tag_label is in property_filter
-        # include_overdue is in property_filter.*_date_filter.use_time_component
-        tz: Optional[str] # Keep tz for fetch logic if needed separately
+        tz_info: Optional[ZoneInfo] # Pass ZoneInfo
     ) -> List[TaskDict]:
         """Orchestrates the task filtering process using PropertyFilter."""
 
         # 1. Fetch Tasks based on status and completion date range (if applicable)
         # Pass the relevant date filter object to fetcher
         completion_filter = property_filter.completion_date_filter if property_filter.status == 'completed' else None
+
         tasks = await self._fetch_tasks_by_status(
             status=property_filter.status,
             completion_date_filter=completion_filter,
-            tz=tz # Pass tz if needed by fetcher
+            tz_info=tz_info # Pass ZoneInfo
         )
 
         # 2. Filter Tasks using the comprehensive property_filter
@@ -239,6 +261,60 @@ class TaskFilterer:
         return filtered_tasks
 
 
+# --- Helper Function to Build Filter --- #
+
+def _build_property_filter(
+    status: TaskStatus,
+    project_id: Optional[str],
+    tag_label: Optional[TagLabel],
+    priority: Optional[int],
+    due_start_date: Optional[str],
+    due_end_date: Optional[str],
+    completion_start_date: Optional[str],
+    completion_end_date: Optional[str],
+    tz: Optional[str]
+) -> Tuple[PropertyFilter, Optional[ZoneInfo]]:
+    """Constructs PeriodFilter and PropertyFilter objects from raw arguments."""
+    tz_info: Optional[ZoneInfo] = None
+    if tz:
+        try:
+            tz_info = ZoneInfo(tz)
+        except ZoneInfoNotFoundError:
+            logging.warning(f"Invalid timezone '{tz}' provided. Using local time.")
+            # Optionally raise an error or handle differently
+            # raise ValueError(f"Invalid timezone: {tz}")
+
+    due_filter = None
+    if due_start_date or due_end_date:
+        due_filter = PeriodFilter(
+            start_date=due_start_date, # Pass string directly, validator handles it
+            end_date=due_end_date,     # Pass string directly, validator handles it
+            tz=tz_info                 # Pass ZoneInfo object
+        )
+
+    completion_filter = None
+    if completion_start_date or completion_end_date:
+         if status != 'completed':
+              logging.warning("Completion date filter provided but status is not 'completed'. Ignoring completion dates.")
+         else:
+            completion_filter = PeriodFilter(
+                start_date=completion_start_date, # Pass string directly
+                end_date=completion_end_date,     # Pass string directly
+                tz=tz_info                         # Pass ZoneInfo object
+            )
+
+    property_filter = PropertyFilter(
+        status=status,
+        project_id=project_id,
+        tag_label=tag_label,
+        priority=priority,
+        due_date_filter=due_filter if status == 'uncompleted' else None, # Only apply if status is uncompleted
+        completion_date_filter=completion_filter if status == 'completed' else None # Only apply if status is completed
+    )
+
+    return property_filter, tz_info
+
+
 # ================================= #
 # Main Filtering Tool (MCP Entry)  #
 # ================================= #
@@ -246,61 +322,69 @@ class TaskFilterer:
 @mcp.tool()
 @require_client
 async def ticktick_filter_tasks(
-    # Replace individual parameters with the Pydantic model
-    property_filter: PropertyFilter,
-    # Keep sort_by_priority and tz as they are not part of PropertyFilter
+    status: TaskStatus = "uncompleted",
+    project_id: Optional[str] = None,
+    tag_label: Optional[TagLabel] = None,
+    priority: Optional[int] = None,
+    due_start_date: Annotated[Optional[str], Field(description="Optional start date/time (ISO format) for filtering uncompleted tasks by due date.")] = None,
+    due_end_date: Annotated[Optional[str], Field(description="Optional end date/time (ISO format) for filtering uncompleted tasks by due date.")] = None,
+    completion_start_date: Annotated[Optional[str], Field(description="Optional start date/time (ISO format) for filtering completed tasks by completion date.")] = None,
+    completion_end_date: Annotated[Optional[str], Field(description="Optional end date/time (ISO format) for filtering completed tasks by completion date.")] = None,
     sort_by_priority: bool = False,
-    tz: Optional[str] = None # tz might still be useful for API calls if client needs it
+    tz: Annotated[Optional[str], Field(description="Optional timezone name (e.g., 'America/New_York')")] = None
 ) -> str:
     """
-    [Universal Task Filter] Retrieves and filters tasks based on a PropertyFilter object.
-*   **Purpose:** Use this tool to find TickTick tasks matching specific conditions like status, due date, priority, project, etc.
-*   **IMPORTANT:** Provide filter criteria directly as **top-level key-value pairs** in the function call. **Do NOT nest filters under a `property_filter` key.** The function expects individual filter arguments.
-*   **Filter Parameters:**
-    *   `status`: (Optional[str]) Filter by completion status (e.g., "uncompleted", "completed").
-    *   `priority`: (Optional[int]) Filter by priority level (e.g., 0=None, 1=Low, 3=Medium, 5=High).
-    *   `project_id`: (Optional[str]) Filter by project ID (e.g., "p12345").
-    *   `due_date_filter`: (Optional[dict]) Filter by due date range. Must be a dictionary containing:
-        *   `start_date`: (Optional[str]) Start date (YYYY-MM-DD). Inclusive.
-        *   `end_date`: (Optional[str]) End date (YYYY-MM-DD). Inclusive.
-        *   *Note:* At least one of `start_date` or `end_date` must be provided if using `due_date_filter`. All date comparisons ignore time.
-    *   `start_date_filter`: (Optional[dict]) Filter by start date range (same structure as `due_date_filter`).
-    *   `list_id`: (Optional[str]) Filter by list ID.
-    *   `tag`: (Optional[str]) Filter by a specific tag name.
-    *   `created_date_filter`: (Optional[dict]) Filter by creation date range (same structure as `due_date_filter`).
-    *   `completed_date_filter`: (Optional[dict]) Filter by completion date range (same structure as `due_date_filter`).
-*   **Other Parameters:**
-    *   `sort_by_priority`: (Optional[bool]) If True, sorts results by priority (High to None) after filtering. Default: False.
-    *   `tz`: (Optional[str]) Timezone for date operations (e.g., 'America/New_York', 'UTC'). Affects date parsing if dates are ambiguous. Default: System local time.
-*   **Examples:**
-    *   **High priority, uncompleted tasks in project "p123":**
-        Call with: `status="uncompleted", priority=5, project_id="p123"`
-    *   **Uncompleted tasks due today (e.g., "2023-10-27"):**
-        Call with: `status="uncompleted", due_date_filter={"start_date": "2023-10-27", "end_date": "2023-10-27"}`
-    *   **Uncompleted tasks due up to today (e.g., "2024-09-30"):**
-        Call with: `status="uncompleted", due_date_filter={"end_date": "2024-09-30"}`
-*   **Returns:** JSON list of task objects matching criteria, or error information.
+    Filters TickTick tasks based on specified criteria and returns a list of matching tasks.
+
+    Args:
+        status: Task status to filter by ('uncompleted' or 'completed'). Defaults to 'uncompleted'.
+        project_id: Optional project ID string to filter by.
+        tag_label: Optional tag name string to filter by.
+        priority: Optional priority level (0=None, 1=Low, 3=Medium, 5=High) to filter by.
+        due_start_date: Optional start date/time (ISO format like 'YYYY-MM-DD' or 'YYYY-MM-DDTHH:MM:SS') for filtering uncompleted tasks by due date.
+        due_end_date: Optional end date/time (ISO format) for filtering uncompleted tasks by due date.
+        completion_start_date: Optional start date/time (ISO format) for filtering completed tasks by completion date. Requires status='completed'.
+        completion_end_date: Optional end date/time (ISO format) for filtering completed tasks by completion date. Requires status='completed'.
+        sort_by_priority: If True, sorts the results by priority (highest first). Defaults to False.
+        tz: Optional timezone name (e.g., 'America/New_York', 'Europe/London', 'Asia/Seoul') for interpreting date/time strings. Uses local system time if not provided.
+
+    Returns:
+        A JSON string representing a list of task objects matching the filter criteria,
+        or a JSON object with an error message.
     """
     filterer = TaskFilterer()
 
     try:
+        # Build the filter objects using the helper function
+        property_filter, tz_info = _build_property_filter(
+            status=status,
+            project_id=project_id,
+            tag_label=tag_label,
+            priority=priority,
+            due_start_date=due_start_date,
+            due_end_date=due_end_date,
+            completion_start_date=completion_start_date,
+            completion_end_date=completion_end_date,
+            tz=tz
+        )
+
         # Execute the filter
         result = await filterer.filter(
             property_filter=property_filter,
             sort_by_priority=sort_by_priority,
-            tz=tz # Pass tz mainly for fetcher/date context
+            tz_info=tz_info # Pass ZoneInfo to filterer
         )
 
         # Format success response
         return format_response(result)
 
-    except (ConnectionError, ValueError) as e: # Catch errors from filterer/fetch
+    except (ConnectionError, ValueError) as e: # Catch errors from filterer/fetch/parsing
         logging.error(f"Error during filter_tasks execution: {e}", exc_info=True)
         return format_response({"error": str(e), "status": "error"})
     except Exception as e:
         # Detailed error logging for unexpected issues
         logging.error(
-            f"Unexpected error in ticktick_filter_tasks tool: filter={property_filter}, sort={sort_by_priority}, tz={tz}: {e}",
+            f"Unexpected error in ticktick_filter_tasks tool: status={status}, project={project_id}, tag={tag_label}, priority={priority}, due_start={due_start_date}, due_end={due_end_date}, comp_start={completion_start_date}, comp_end={completion_end_date}, sort={sort_by_priority}, tz={tz}: {e}",
             exc_info=True
         )
         return format_response({"error": f"Failed to filter tasks due to unexpected error: {e}", "status": "error"})
