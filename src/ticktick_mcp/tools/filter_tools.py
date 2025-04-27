@@ -354,15 +354,14 @@ async def ticktick_filter_tasks(
     filter_criteria: Dict[str, Any]
 ) -> str:
     """
-    Filters TickTick tasks based on specified criteria provided as a JSON string or dictionary,
-    and returns a list of matching tasks as a JSON string.
+    Filters TickTick tasks based on specified criteria and returns matching tasks.
 
     Args:
-        filter_criteria: A JSON dictionary containing filter parameters.
-            Expected keys:
+        filter_criteria (Dict[str, Any]): A dictionary containing filter parameters. Required.
+            Supported keys:
             - status (str): Task status ('uncompleted' or 'completed'). Defaults to 'uncompleted'.
-            - project_id (str, optional): Project ID to filter by.
-            - tag_label (str, optional): Tag name to filter by.
+            - project_id (str, optional): Project ID to filter tasks by.
+            - tag_label (str, optional): Tag name to filter tasks by.
             - priority (int, optional): Priority level (0=None, 1=Low, 3=Medium, 5=High).
             - due_start_date (str, optional): ISO format start date/time for due date filter.
             - due_end_date (str, optional): ISO format end date/time for due date filter.
@@ -370,15 +369,91 @@ async def ticktick_filter_tasks(
             - completion_end_date (str, optional): ISO format end date/time for completion date filter (requires status='completed').
             - sort_by_priority (bool, optional): Sort results by priority (descending). Defaults to False.
             - tz (str, optional): Timezone name (e.g., 'America/New_York') for date interpretation.
-    Example:
-        {
-            "status": "uncompleted",
-            "due_end_date": "2024-01-31",
-            "tz": "Asia/Seoul"
-        }
+
     Returns:
-        A JSON string representing a list of task objects matching the filter criteria,
-        or a JSON object with an error message.
+        A JSON string with one of the following structures:
+        - Success: A list of task objects matching the filter criteria (may be empty)
+        - Error: {"error": "Error message describing what went wrong", "status": "error"}
+
+    Limitations:
+        - Date filters require proper ISO 8601 format (YYYY-MM-DD or YYYY-MM-DDTHH:MM:SS+TIMEZONE)
+        - Completion date filters only work when status is set to 'completed'
+        - Filtering by multiple tags in a single query is not supported
+        - For complex filtering needs, you may need to perform multiple queries and combine results
+        - Maximum number of results may be limited for performance reasons
+        - For completed tasks, at least one date filter (start or end) is required
+        - Time components in dates require timezone information for accurate filtering
+
+    Examples:
+        Get all tasks due today:
+        {
+            "filter_criteria": {
+                "status": "uncompleted",
+                "due_end_date": "2024-07-25",
+                "tz": "Asia/Seoul"
+            }
+        }
+
+        Get high priority tasks from a specific project:
+        {
+            "filter_criteria": {
+                "status": "uncompleted",
+                "project_id": "project_id_123",
+                "priority": 5,
+                "sort_by_priority": true
+            }
+        }
+
+        Get tasks completed in the last week:
+        {
+            "filter_criteria": {
+                "status": "completed",
+                "completion_start_date": "2024-07-18",
+                "completion_end_date": "2024-07-25",
+                "tz": "America/New_York"
+            }
+        }
+
+        Get tasks with a specific tag:
+        {
+            "filter_criteria": {
+                "status": "uncompleted",
+                "tag_label": "work"
+            }
+        }
+
+    Agent Usage Guide:
+        - This is the most versatile tool for finding tasks based on specific criteria
+        - Always specify a timezone (tz) when using date filters to ensure correct interpretation
+        - For date ranges, use both start and end dates (e.g., due_start_date and due_end_date)
+        - When status is 'completed', you MUST include at least one completion date filter
+        - Map natural language date references to ISO format dates:
+          "today" → current date in YYYY-MM-DD
+          "this week" → due_start_date=beginning of week, due_end_date=end of week
+        - Example mappings:
+          "Show me tasks due today" → {
+              "filter_criteria": {
+                  "status": "uncompleted",
+                  "due_start_date": "[today's date]",
+                  "due_end_date": "[today's date]",
+                  "tz": "[user's timezone]"
+              }
+          }
+          "Find my high priority work tasks" → {
+              "filter_criteria": {
+                  "status": "uncompleted",
+                  "project_id": "[work project ID]",
+                  "priority": 5
+              }
+          }
+          "What tasks did I complete last week?" → {
+              "filter_criteria": {
+                  "status": "completed",
+                  "completion_start_date": "[last week's start date]",
+                  "completion_end_date": "[last week's end date]",
+                  "tz": "[user's timezone]"
+              }
+          }
     """
     filterer = TaskFilterer()
 

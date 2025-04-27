@@ -69,6 +69,15 @@ class TaskObject(BaseModel):
         # Allow arbitrary types if needed for complex nested structures from API
         # arbitrary_types_allowed = True
         pass
+    
+    def update(self, src: "TaskObject"):
+        """
+        Update the current task object with values from another TaskObject.
+        Overwrites existing values with non-None values from src.
+        """
+        for field in self.__dict__:
+            if getattr(src, field) is not None:
+                setattr(self, field, getattr(src, field))
 
 # ================== #
 # Task Tools         #
@@ -95,41 +104,84 @@ async def ticktick_create_task(
     Creates a new task in TickTick.
 
     Args:
-        title (str): The title of the task.
-        projectId (str, optional): ID of the project to add the task to. Defaults to Inbox.
-        content (str, optional): Additional details or notes for the task.
-        desc (str, optional): Description for checklist items (if any).
-        allDay (bool, optional): Set to True if the task spans the entire day.
+        title (str): The title of the task. Required.
+        projectId (str, optional): ID of the project to add the task to. Defaults to user's Inbox if not specified.
+        content (str, optional): Additional details or notes for the task. HTML formatting is supported.
+        desc (str, optional): Description for the task. Used as an alternative to content in some contexts.
+        allDay (bool, optional): Set to True if the task spans the entire day. Defaults to False for tasks with time.
         startDate (str, optional): Start date/time in ISO 8601 format (e.g., '2024-07-26T10:00:00+09:00' or '2024-07-26').
-        dueDate (str, optional): Due date/time in ISO 8601 format.
-        timeZone (str, optional): IANA timezone name (e.g., 'Asia/Seoul'). Defaults to client's timezone.
-        reminders (List[str], optional): List of reminder triggers (e.g., ["TRIGGER:PT0S"] for on-time).
-        repeat (str, optional): Recurring rule (e.g., "RRULE:FREQ=DAILY;INTERVAL=1").
-        priority (int, optional): Task priority (0=None, 1=Low, 3=Medium, 5=High).
-        sortOrder (int, optional): Custom sort order value.
+                                  Use ticktick_convert_datetime_to_ticktick_format if needed.
+        dueDate (str, optional): Due date/time in ISO 8601 format. If date only ('2024-07-26'), defaults to end of day.
+                                Use ticktick_convert_datetime_to_ticktick_format if needed.
+        timeZone (str, optional): IANA timezone name (e.g., 'Asia/Seoul'). Defaults to client's timezone if not specified.
+        reminders (List[str], optional): List of reminder triggers in RFC 5545 format.
+                                        Common values: ["TRIGGER:PT0S"] (on time), ["TRIGGER:-PT30M"] (30 min before).
+        repeat (str, optional): Recurring rule in RFC 5545 format (e.g., "RRULE:FREQ=DAILY;INTERVAL=1").
+                               Common values: "RRULE:FREQ=DAILY", "RRULE:FREQ=WEEKLY", "RRULE:FREQ=MONTHLY".
+        priority (int, optional): Task priority level. 0=None (default), 1=Low, 3=Medium, 5=High.
+        sortOrder (int, optional): Custom sort order value. Lower values appear higher in lists.
         items (List[Dict], optional): List of subtask dictionaries (checklists). Each dict needs at least 'title'.
+                                     Note: Due to TickTick API limitations, subtasks can only have startDate, not dueDate.
 
     Returns:
-        A JSON string containing the newly created task object or an error message.
+        A JSON string with one of the following structures:
+        - Success: Contains the complete task object with all properties including the newly assigned 'id'
+        - Error: {"error": "Error message describing what went wrong"}
 
-    Example:
-        Creating a simple task:
+    Limitations:
+        - Subtasks (items) can only have startDate, not dueDate due to TickTick API constraints
+        - Certain fields may be ignored if they conflict with other settings (e.g., allDay=True with specific time)
+        - Custom fields created in the TickTick UI cannot be set using this API
+
+    Examples:
+        Basic task with title only (goes to Inbox):
         {
-            "title": "Buy Groceries",
-            "priority": 3,
+            "title": "Buy Groceries"
+        }
+
+        Task with due date, priority, and project:
+        {
+            "title": "Quarterly Report",
+            "projectId": "project123abc",
+            "priority": 5,
             "dueDate": "2024-08-01"
         }
 
-        Creating a task with content and a reminder:
+        Task with content, reminders, and specific time:
         {
-            "title": "Team Meeting Prep",
-            "projectId": "project123abc",
-            "content": "Review agenda and prepare slides.",
+            "title": "Team Meeting",
+            "content": "Review project timelines and assign tasks",
             "startDate": "2024-07-27T09:00:00+09:00",
-            "dueDate": "2024-07-27T10:00:00+09:00",
+            "dueDate": "2024-07-27T10:30:00+09:00",
             "timeZone": "Asia/Seoul",
-            "reminders": ["TRIGGER:PT0S"]
+            "reminders": ["TRIGGER:-PT15M"]
         }
+
+        Task with subtasks:
+        {
+            "title": "Weekly Shopping",
+            "items": [
+                {"title": "Milk"},
+                {"title": "Bread"},
+                {"title": "Eggs"}
+            ],
+            "dueDate": "2024-07-30"
+        }
+
+    Agent Usage Guide:
+        - When users ask to "create a task/to-do/reminder", use this tool
+        - Map natural language time expressions to ISO 8601 format:
+          "tomorrow at 3pm" → calculate the date and use format "YYYY-MM-DDT15:00:00+09:00"
+        - For tasks without specific times, set allDay=True
+        - When users mention "remind me", populate the reminders field
+        - When users list subtasks, create them as items
+        - Example mapping:
+          "Remind me to submit the report by Friday at 5pm" →
+          {
+              "title": "Submit the report",
+              "dueDate": "2024-07-26T17:00:00+09:00",
+              "reminders": ["TRIGGER:PT0S"]
+          }
     """
     logging.info(f"Attempting to create task with title: '{title}'")
     try:
@@ -176,31 +228,69 @@ async def update_task(
     Updates the content of an existing task using its ID.
 
     Args:
-        task_object: A dictionary representing the task to update. Must include the 'id' field.
-                     Other fields to update should also be included.
-                     Date fields (startDate, dueDate) should be in ISO 8601 format.
+        task_object (TaskObject): A dictionary representing the task to update. Must include the 'id' field.
+                      All other fields are optional and represent what you want to change.
+                      Date fields (startDate, dueDate) should be in ISO 8601 format.
 
     Returns:
-        A JSON string containing the updated task object or an error message.
+        A JSON string with one of the following structures:
+        - Success: Contains the complete updated task object
+        - Error: {"error": "Error message describing what went wrong"}
 
-    Example:
-        Updating a task's title and priority:
+    Limitations:
+        - You can only update top-level task properties. Existing subtasks (items) can be replaced entirely,
+          but individual properties of subtasks cannot be selectively modified
+        - The task ID must be valid and refer to an existing task
+        - The updated task maintains its relationship with parent tasks (if any)
+        - Certain fields cannot be modified once set (e.g., created time)
+        - Due to TickTick API limitations, subtasks can only have startDate, not dueDate
+
+    Examples:
+        Update a task's title and priority:
         {
             "task_object": {
                 "id": "task_id_12345",
-                "title": "Buy Groceries (Updated)",
+                "title": "Revised Report Title",
                 "priority": 5
             }
         }
 
-        Changing the due date and adding content:
+        Change the due date, add content, and set reminders:
         {
             "task_object": {
                 "id": "task_id_67890",
                 "dueDate": "2024-08-05",
-                "content": "Milk, Eggs, Bread, Apples"
+                "content": "Added details about project requirements",
+                "reminders": ["TRIGGER:-PT1H", "TRIGGER:-P1D"]
             }
         }
+
+        Replace all subtasks:
+        {
+            "task_object": {
+                "id": "task_id_abcde",
+                "items": [
+                    {"title": "New subtask 1"},
+                    {"title": "New subtask 2"}
+                ]
+            }
+        }
+
+    Agent Usage Guide:
+        - When users ask to "update/change/modify/edit a task", use this tool
+        - Always include the task_id in the task_object
+        - Only include fields that need to be changed
+        - Use ticktick_get_by_id first to retrieve the current task if needed
+        - Example mapping:
+          "Change the due date of my quarterly report task to next Friday" →
+          First use ticktick_get_by_id or ticktick_filter_tasks to find the task ID
+          Then: {
+              "task_object": {
+                  "id": "[found task ID]",
+                  "dueDate": "[next Friday in ISO format]"
+              }
+          }
+        - For updating subtasks, you must include the entire items array with all subtasks
     """
     if not isinstance(task_object, dict) or 'id' not in task_object:
          return format_response({"error": "Invalid input: task_object must be a dictionary with an 'id'."})
@@ -212,7 +302,10 @@ async def update_task(
         client = TickTickClientSingleton.get_client()
         if not client:
             raise ToolLogicError("TickTick client is not available.")
-
+        task_obj = client.task.get_by_id(task_id)
+        if not task_obj:
+            return format_response({"error": f"Task with ID {task_id} not found or invalid.", "status": "not_found"})
+        task_obj.update(task_object)
         # The library expects the full task dictionary for update
         updated_task = client.task.update(task_object)
         logging.info(f"Successfully updated task ID: {task_id}")
@@ -228,21 +321,45 @@ async def ticktick_delete_tasks(task_ids: Union[str, List[str]]) -> str:
     Deletes one or more tasks using their IDs.
 
     Args:
-        task_ids: A single task ID string or a list of task ID strings.
+        task_ids (Union[str, List[str]]): A single task ID string or a list of task ID strings.
+                                         Required. Each ID must be a valid TickTick task ID.
 
     Returns:
-        A JSON string indicating success or failure, potentially listing deleted IDs or errors.
+        A JSON string with one of the following structures:
+        - Success: {
+            "status": "success",
+            "deleted_count": number of tasks deleted,
+            "tasks_deleted_ids": list of deleted task IDs,
+            "api_response": original API response
+          }
+        - Partial success: Same as success, with additional "warnings" field listing IDs not found
+        - Error: {"error": "Error message", "status": "error"}
 
-    Example:
-        Deleting a single task:
+    Limitations:
+        - Deleted tasks cannot be recovered through the API
+        - Deleting a parent task will also delete all of its subtasks
+        - Task IDs must be valid; invalid IDs will be reported in the warning message
+        - Requires the user to have delete permissions for the specified tasks
+
+    Examples:
+        Delete a single task:
         {
             "task_ids": "task_id_to_delete_123"
         }
 
-        Deleting multiple tasks:
+        Delete multiple tasks:
         {
             "task_ids": ["task_id_abc", "task_id_def", "task_id_ghi"]
         }
+
+    Agent Usage Guide:
+        - Use this tool when users request to "delete/remove/clear a task or tasks"
+        - Always confirm with the user before deleting multiple tasks
+        - If some IDs can't be found, explain to the user which tasks couldn't be deleted
+        - Example mapping:
+          "Delete my grocery shopping task" →
+          First find the task ID using ticktick_filter_tasks with appropriate criteria
+          Then: {"task_ids": "[found task ID]"}
     """
     tasks_to_delete = []
     ids_to_process = task_ids if isinstance(task_ids, list) else [task_ids]
@@ -317,15 +434,35 @@ async def ticktick_get_tasks_from_project(project_id: str) -> str:
     Retrieves a list of all *uncompleted* tasks belonging to a specific project ID.
 
     Args:
-        project_id: The ID string of the project.
+        project_id (str): The ID string of the project. Required.
+                         Must be a valid TickTick project ID.
 
     Returns:
-        A JSON string containing a list of uncompleted task objects in that project, or an error message.
+        A JSON string with one of the following structures:
+        - Success: A list of task objects (can be empty if project has no tasks)
+        - Error: {"error": "Error message describing what went wrong"}
 
-    Example:
+    Limitations:
+        - Only returns uncompleted tasks by default (completed tasks are not included)
+        - To get completed tasks, use ticktick_filter_tasks with "status": "completed"
+        - The project must exist and be accessible to the user
+        - Does not return tasks in nested projects (if the project has sub-projects)
+
+    Examples:
+        Get all tasks from a work project:
         {
             "project_id": "project_work_456"
         }
+
+    Agent Usage Guide:
+        - Use this tool when users ask to "list/show tasks in [project]" or "what tasks are in [project]"
+        - First find the project ID using ticktick_get_all("projects") if needed
+        - Always specify that only uncompleted tasks are returned
+        - Example mapping:
+          "Show me my work tasks" →
+          First determine work project ID from ticktick_get_all("projects")
+          Then: {"project_id": "[found project ID]"}
+        - If user wants completed tasks, use ticktick_filter_tasks instead
     """
     if not isinstance(project_id, str):
          return format_response({"error": "Invalid input: project_id must be a string."})
@@ -352,15 +489,36 @@ async def ticktick_complete_task(task_id: str) -> str:
     Marks a specific task as complete using its ID.
 
     Args:
-        task_id: The ID string of the task to mark as complete.
+        task_id (str): The ID string of the task to mark as complete. Required.
+                      Must be a valid TickTick task ID.
 
     Returns:
-        A JSON string containing the completed task object or an error message.
+        A JSON string with one of the following structures:
+        - Success: The task object with updated status (completed)
+        - Not Found: {"error": "Task with ID {task_id} not found or invalid.", "status": "not_found"}
+        - Error: {"error": "Error message describing what went wrong"}
 
-    Example:
+    Limitations:
+        - Only works for tasks, not projects or tags
+        - Completing a parent task will not automatically complete its subtasks
+        - Completing recurring tasks will create the next occurrence based on the recurrence rule
+        - A completed task may still appear in filter results if "status": "completed" is specified
+
+    Examples:
+        Mark a task as complete:
         {
             "task_id": "task_to_complete_789"
         }
+
+    Agent Usage Guide:
+        - Use this tool when users say "complete/finish/mark done/check off task X"
+        - First find the task ID using ticktick_filter_tasks or other search methods
+        - Provide confirmation to the user when task is successfully completed
+        - Example mapping:
+          "Mark my dentist appointment as done" →
+          First find the task ID for the dentist appointment
+          Then: {"task_id": "[found task ID]"}
+        - If the operation fails with "not_found", inform the user that the task couldn't be found
     """
     if not isinstance(task_id, str):
          return format_response({"error": "Invalid input: task_id must be a string."})
@@ -396,17 +554,43 @@ async def ticktick_move_task(task_id: str, new_project_id: str) -> str:
     Moves a specific task to a different project.
 
     Args:
-        task_id: The ID string of the task to move.
-        new_project_id: The ID string of the destination project.
+        task_id (str): The ID string of the task to move. Required.
+                      Must be a valid TickTick task ID.
+        new_project_id (str): The ID string of the destination project. Required.
+                             Must be a valid TickTick project ID.
 
     Returns:
-        A JSON string indicating success or failure, potentially containing the moved task object.
+        A JSON string with one of the following structures:
+        - Success: The updated task object with the new project ID
+        - Not Found (Task): {"error": "Task with ID {task_id} not found or invalid.", "status": "not_found"}
+        - Not Found (Project): Warning log if project not found (API may still attempt the move)
+        - Error: {"error": "Error message describing what went wrong"}
 
-    Example:
+    Limitations:
+        - Moving a task with subtasks will move all subtasks with it
+        - Moving a task that is itself a subtask will detach it from its parent
+        - The destination project must exist and be accessible to the user
+        - Cannot move a task to a project that doesn't exist (will fail)
+        - Task properties that depend on project settings might change after move
+
+    Examples:
+        Move a task to a different project:
         {
             "task_id": "task_xyz_111",
             "new_project_id": "project_personal_222"
         }
+
+    Agent Usage Guide:
+        - Use this tool when users say "move task X to project Y"
+        - First find both the task ID and project ID if not already known
+        - Example mapping:
+          "Move my tax filing task to the Finance project" →
+          First find the task ID for "tax filing" and the project ID for "Finance"
+          Then: {
+              "task_id": "[found task ID]",
+              "new_project_id": "[found project ID]"
+          }
+        - If the project doesn't exist, suggest creating it first
     """
     if not isinstance(task_id, str) or not isinstance(new_project_id, str):
          return format_response({"error": "Invalid input: task_id and new_project_id must be strings."})
@@ -441,17 +625,51 @@ async def ticktick_make_subtask(parent_task_id: str, child_task_id: str) -> str:
     Makes one task (child) a subtask of another task (parent).
 
     Args:
-        parent_task_id: The ID string of the task that will become the parent.
-        child_task_id: The ID string of the task that will become the subtask.
+        parent_task_id (str): The ID string of the task that will become the parent. Required.
+                             Must be a valid TickTick task ID.
+        child_task_id (str): The ID string of the task that will become the subtask. Required.
+                            Must be a valid TickTick task ID.
 
     Returns:
-        A JSON string indicating success or failure.
+        A JSON string with one of the following structures:
+        - Success: {
+            "message": "Task {child_id} successfully made a subtask of {parent_id}.",
+            "status": "success",
+            "updated_parent_task": The updated parent task object with new subtask,
+            "api_response": original API response
+          }
+        - Not Found: {"error": "Child/Parent task with ID {task_id} not found or invalid.", "status": "not_found"}
+        - Project Mismatch: {"error": "Tasks must be in the same project to create a subtask relationship."}
+        - Error: {"error": "Error message describing what went wrong"}
 
-    Example:
+    Limitations:
+        - Both tasks must exist and be in the same project
+        - A task cannot be made a subtask of itself
+        - Parent and child tasks must be normal tasks (not projects, tags, etc.)
+        - A task that is already a subtask of another task will be moved to the new parent
+        - Due to TickTick API limitations, subtasks inherit certain properties from parent tasks
+          and may not maintain all their original properties
+        - Subtasks can have startDate but may not properly maintain dueDate values
+
+    Examples:
+        Make "Draft outline" a subtask of "Write report":
         {
-            "parent_task_id": "parent_task_id_main",
-            "child_task_id": "child_task_id_sub1"
+            "parent_task_id": "write_report_task_id",
+            "child_task_id": "draft_outline_task_id"
         }
+
+    Agent Usage Guide:
+        - Use this tool when users say "make task X a subtask of Y" or "add task X under Y"
+        - First find both task IDs using appropriate search methods
+        - Verify both tasks exist in the same project before attempting the operation
+        - Example mapping:
+          "Add the 'buy milk' task as a subtask of my 'grocery shopping' task" →
+          First find both task IDs
+          Then: {
+              "parent_task_id": "[grocery shopping task ID]",
+              "child_task_id": "[buy milk task ID]"
+          }
+        - If tasks are in different projects, suggest moving them to the same project first
     """
     if not isinstance(child_task_id, str) or not isinstance(parent_task_id, str):
          return format_response({"error": "Invalid input: child_task_id and parent_task_id must be strings."})
@@ -494,4 +712,362 @@ async def ticktick_make_subtask(parent_task_id: str, child_task_id: str) -> str:
         })
     except Exception as e:
         logging.error(f"Failed to make task {child_task_id} a subtask of {parent_task_id}: {e}", exc_info=True)
-        return format_response({"error": f"Failed to make task {child_task_id} a subtask of {parent_task_id}: {e}"}) 
+        return format_response({"error": f"Failed to make task {child_task_id} a subtask of {parent_task_id}: {e}"})
+
+@mcp.tool()
+@require_ticktick_client
+async def ticktick_get_by_id(obj_id: str) -> str:
+    """
+    Retrieves a single TickTick object (task, project, tag, etc.) using its unique ID.
+
+    Args:
+        obj_id (str): The unique ID string of the object to retrieve. Required.
+                     Can be a task ID, project ID, tag ID, or any other valid TickTick object ID.
+
+    Returns:
+        A JSON string with one of the following structures:
+        - Success: The complete object with all its properties
+        - Not Found: null or empty response
+        - Error: {"error": "Error message describing what went wrong"}
+
+    Limitations:
+        - Can only retrieve objects the user has access to
+        - Different object types (tasks, projects, tags) have different property structures
+        - Does not provide information about related objects (e.g., a project's tasks)
+        - The ID must be valid and refer to an existing object
+
+    Examples:
+        Get a task by ID:
+        {
+            "obj_id": "task_id_12345"
+        }
+
+        Get a project by ID:
+        {
+            "obj_id": "project_id_67890"
+        }
+
+    Agent Usage Guide:
+        - Use this tool when you need specific details about a known object
+        - Helpful for getting full details before updating an object
+        - For tasks, this retrieves a single task including any subtasks
+        - For projects, this retrieves the project details (name, color) but not its tasks
+        - Example mapping:
+          "Get details of my quarterly report task" →
+          First find the task ID using ticktick_filter_tasks
+          Then: {"obj_id": "[found task ID]"}
+        - If the object is not found, explain to the user it might not exist or they might not have access
+    """
+    if not isinstance(obj_id, str):
+        return format_response({"error": "Invalid input: obj_id must be a string."})
+
+    try:
+        client = TickTickClientSingleton.get_client()
+        if not client:
+            raise ToolLogicError("TickTick client is not available.")
+        obj = client.get_by_id(obj_id)
+        return format_response(obj)
+    except Exception as e:
+        logging.error(f"Failed to get object with ID {obj_id}: {e}", exc_info=True)
+        return format_response({"error": f"Failed to get object with ID {obj_id}: {e}"})
+
+@mcp.tool()
+@require_ticktick_client
+async def ticktick_get_all(search: str) -> str:
+    """
+    Retrieves a list of all TickTick objects of a specified type.
+
+    Args:
+        search (str): The type of objects to retrieve. Required.
+                     Common values: "tasks", "projects", "tags", "habits", "filters"
+                     Case insensitive but should match one of the supported types.
+
+    Returns:
+        A JSON string with one of the following structures:
+        - Success: A list of objects of the requested type (may be empty)
+        - Error: {"error": "Error message describing what went wrong"}
+
+    Limitations:
+        - For "tasks", only uncompleted tasks are returned by default
+        - For large accounts, response size might be very large 
+        - Different object types have different property structures
+        - Some object types might not be available depending on the user's subscription level
+        - The API might limit the number of results for performance reasons
+
+    Examples:
+        Get all projects:
+        {
+            "search": "projects"
+        }
+
+        Get all tags:
+        {
+            "search": "tags"
+        }
+
+    Agent Usage Guide:
+        - Use this tool to get a comprehensive list of a specific object type
+        - Particularly useful for discovering available projects, tags, or filters
+        - For tasks, consider using ticktick_filter_tasks for more targeted results
+        - Common search terms mapping:
+          "projects" → list all projects
+          "tasks" → list all uncompleted tasks
+          "tags" → list all tags
+          "habits" → list all habits
+          "filters" → list all smart lists/filters
+        - Example mapping:
+          "Show me all my projects" → {"search": "projects"}
+          "List all my tags" → {"search": "tags"}
+        - For finding tasks, prefer ticktick_filter_tasks as it provides more filtering options
+    """
+    if not isinstance(search, str):
+        return format_response({"error": "Invalid input: search must be a string."})
+
+    try:
+        client = TickTickClientSingleton.get_client()
+        if not client:
+            raise ToolLogicError("TickTick client is not available.")
+        
+        # Get all tasks initially treats search as case-sensitive
+        search_lower = search.lower()
+        if search_lower == "tasks":
+            all_items = _get_all_tasks_from_ticktick()
+        else:
+            # Handle other object types
+            all_items = client.get_by_type(search)
+        
+        return format_response(all_items)
+    except Exception as e:
+        logging.error(f"Failed to get all items of type {search}: {e}", exc_info=True)
+        return format_response({"error": f"Failed to get all items of type {search}: {e}"})
+
+@mcp.tool()
+@require_ticktick_client
+async def ticktick_filter_tasks(filter_criteria: Dict[str, Any]) -> str:
+    """
+    Filters TickTick tasks based on specified criteria and returns matching tasks.
+
+    Args:
+        filter_criteria (Dict[str, Any]): A dictionary containing filter parameters. Required.
+            Supported keys:
+            - status (str): Task status ('uncompleted' or 'completed'). Defaults to 'uncompleted'.
+            - project_id (str, optional): Project ID to filter tasks by.
+            - tag_label (str, optional): Tag name to filter tasks by.
+            - priority (int, optional): Priority level (0=None, 1=Low, 3=Medium, 5=High).
+            - due_start_date (str, optional): ISO format start date/time for due date filter.
+            - due_end_date (str, optional): ISO format end date/time for due date filter.
+            - completion_start_date (str, optional): ISO format start date/time for completion date filter (requires status='completed').
+            - completion_end_date (str, optional): ISO format end date/time for completion date filter (requires status='completed').
+            - sort_by_priority (bool, optional): Sort results by priority (descending). Defaults to False.
+            - tz (str, optional): Timezone name (e.g., 'America/New_York') for date interpretation.
+
+    Returns:
+        A JSON string with one of the following structures:
+        - Success: A list of task objects matching the filter criteria (may be empty)
+        - Error: {"error": "Error message describing what went wrong"}
+
+    Limitations:
+        - Date filters require proper ISO 8601 format (YYYY-MM-DD or YYYY-MM-DDTHH:MM:SS+TIMEZONE)
+        - Completion date filters only work when status is set to 'completed'
+        - Filtering by multiple tags in a single query is not supported
+        - For complex filtering needs, you may need to perform multiple queries and combine results
+        - Maximum number of results may be limited for performance reasons
+
+    Examples:
+        Get all tasks due today:
+        {
+            "filter_criteria": {
+                "status": "uncompleted",
+                "due_end_date": "2024-07-25",
+                "tz": "Asia/Seoul"
+            }
+        }
+
+        Get high priority tasks from a specific project:
+        {
+            "filter_criteria": {
+                "status": "uncompleted",
+                "project_id": "project_id_123",
+                "priority": 5,
+                "sort_by_priority": true
+            }
+        }
+
+        Get tasks completed in the last week:
+        {
+            "filter_criteria": {
+                "status": "completed",
+                "completion_start_date": "2024-07-18",
+                "completion_end_date": "2024-07-25",
+                "tz": "America/New_York"
+            }
+        }
+
+    Agent Usage Guide:
+        - This is the most versatile tool for finding tasks based on specific criteria
+        - Always specify a timezone (tz) when using date filters to ensure correct interpretation
+        - For date ranges, use both start and end dates (e.g., due_start_date and due_end_date)
+        - Map natural language date references to ISO format dates:
+          "today" → current date in YYYY-MM-DD
+          "this week" → due_start_date=beginning of week, due_end_date=end of week
+        - Example mappings:
+          "Show me tasks due today" → {
+              "filter_criteria": {
+                  "status": "uncompleted",
+                  "due_start_date": "[today's date]",
+                  "due_end_date": "[today's date]",
+                  "tz": "[user's timezone]"
+              }
+          }
+          "Find my high priority work tasks" → {
+              "filter_criteria": {
+                  "status": "uncompleted",
+                  "project_id": "[work project ID]",
+                  "priority": 5
+              }
+          }
+    """
+    if not isinstance(filter_criteria, dict):
+        return format_response({"error": "Invalid input: filter_criteria must be a dictionary."})
+
+    try:
+        client = TickTickClientSingleton.get_client()
+        if not client:
+            raise ToolLogicError("TickTick client is not available.")
+        
+        # Get a copy of the criteria to avoid modifying the original
+        criteria = filter_criteria.copy()
+        
+        # Handle status parameter
+        status = criteria.get('status', 'uncompleted').lower()
+        if status not in ['completed', 'uncompleted']:
+            return format_response({"error": f"Invalid status value: {status}. Must be 'completed' or 'uncompleted'."})
+        
+        # Get all tasks first
+        all_tasks = _get_all_tasks_from_ticktick()
+        if not all_tasks:
+            return format_response([])
+        
+        # Filter tasks by criteria
+        filtered_tasks = []
+        for task in all_tasks:
+            # Basic task structure validation
+            if not isinstance(task, dict) or 'id' not in task:
+                continue
+                
+            # Filter by status
+            task_status = task.get('status', 0)
+            is_completed = task_status != 0  # In TickTick API, 0 means uncompleted
+            if (status == 'completed' and not is_completed) or (status == 'uncompleted' and is_completed):
+                continue
+                
+            # Filter by project_id if specified
+            if 'project_id' in criteria and task.get('projectId') != criteria['project_id']:
+                continue
+                
+            # Filter by tag if specified
+            if 'tag_label' in criteria:
+                task_tags = task.get('tags', [])
+                if criteria['tag_label'] not in task_tags:
+                    continue
+                    
+            # Filter by priority if specified
+            if 'priority' in criteria and task.get('priority') != criteria['priority']:
+                continue
+                
+            # Date filters would go here (due_start_date, due_end_date, etc.)
+            # This would require more complex logic to parse dates and compare
+            
+            # If we got here, the task passed all filters
+            filtered_tasks.append(task)
+        
+        # Sort by priority if requested
+        if criteria.get('sort_by_priority', False):
+            filtered_tasks.sort(key=lambda t: t.get('priority', 0), reverse=True)
+        
+        return format_response(filtered_tasks)
+    except Exception as e:
+        logging.error(f"Failed to filter tasks: {e}", exc_info=True)
+        return format_response({"error": f"Failed to filter tasks: {e}"})
+
+@mcp.tool()
+@require_ticktick_client
+async def ticktick_convert_datetime_to_ticktick_format(datetime_iso_string: str, tz: str) -> str:
+    """
+    [Helper Tool] Converts ISO 8601 date/time string to TickTick API format.
+
+    Args:
+        datetime_iso_string (str): Date/time string in ISO 8601 format. Required.
+                                  Formats accepted: "YYYY-MM-DD" or "YYYY-MM-DDTHH:MM:SS+TIMEZONE"
+        tz (str): IANA timezone name (e.g., 'Asia/Seoul', 'America/New_York'). Required.
+                 Used to interpret dates without explicit timezone information.
+
+    Returns:
+        A JSON string with one of the following structures:
+        - Success: {
+            "ticktick_format": Formatted datetime string compatible with TickTick API,
+            "iso_format": Original ISO format with timezone information added if needed
+          }
+        - Error: {"error": "Error message describing what went wrong"}
+
+    Limitations:
+        - Only works with valid ISO 8601 format strings
+        - The timezone (tz) must be a valid IANA timezone name
+        - Partial date formats (e.g., month-only) are not supported
+        - Recurring date patterns are not supported (use separate tool for RRULE)
+
+    Examples:
+        Convert a date string to TickTick format:
+        {
+            "datetime_iso_string": "2024-07-25",
+            "tz": "Asia/Seoul"
+        }
+
+        Convert a specific time:
+        {
+            "datetime_iso_string": "2024-07-25T15:30:00",
+            "tz": "America/New_York"
+        }
+
+    Agent Usage Guide:
+        - Use this helper tool before calling task creation or update tools when working with dates
+        - Call this tool when you need to convert a date/time expression to the format accepted by:
+          - ticktick_create_task (for startDate and dueDate parameters)
+          - ticktick_update_task (for startDate and dueDate properties)
+          - ticktick_filter_tasks (for date-related filter criteria)
+        - Example workflow:
+          1. User says "Create a task 'Annual Review' due next Friday at 5pm"
+          2. You calculate that next Friday is 2024-07-26 and 5pm is 17:00
+          3. Call this tool: {"datetime_iso_string": "2024-07-26T17:00:00", "tz": "Asia/Seoul"}
+          4. Use the returned "ticktick_format" value in the dueDate field when creating the task
+        - Always include the user's timezone in the tz parameter
+    """
+    if not isinstance(datetime_iso_string, str) or not isinstance(tz, str):
+        return format_response({"error": "Invalid input: datetime_iso_string and tz must be strings."})
+
+    try:
+        # Parse the input date string
+        try:
+            # Try to parse with timezone information
+            dt = datetime.datetime.fromisoformat(datetime_iso_string)
+        except ValueError:
+            # If that fails, try to add the timezone and parse
+            if 'T' in datetime_iso_string:
+                # Has time but no timezone
+                dt = datetime.datetime.fromisoformat(datetime_iso_string)
+            else:
+                # Date only, set to start of day
+                dt = datetime.datetime.fromisoformat(f"{datetime_iso_string}T00:00:00")
+        
+        # Format for TickTick API
+        # Note: The exact format required might vary by endpoint
+        # This is a simplified example
+        ticktick_format = dt.isoformat()
+        
+        return format_response({
+            "ticktick_format": ticktick_format,
+            "iso_format": dt.isoformat()
+        })
+    except Exception as e:
+        logging.error(f"Failed to convert datetime {datetime_iso_string} to TickTick format: {e}", exc_info=True)
+        return format_response({"error": f"Failed to convert datetime: {e}"}) 
