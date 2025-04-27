@@ -26,3 +26,8 @@ ticktick-mcp = "main:main"
 
 [tool.uv.sources]
 ticktick-py = { git = "https://github.com/jen6/ticktick-py.git", rev = "main" }
+
+[dependency-groups]
+dev = [
+    "pytest>=8.3.5",
+]

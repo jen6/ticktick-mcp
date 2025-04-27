@@ -44,29 +44,20 @@ def _get_all_tasks_from_ticktick() -> List[TaskObject]:
 
     all_tasks = []
     try:
-        projects_state = client.ticktick_client.state.get('projects')
-        if projects_state is None: projects_state = []
+        projects_state = client.ticktick_client.state.get('projects', [])
     except Exception as e:
         logging.error(f"Error accessing client state for projects: {e}", exc_info=True)
         projects_state = []
 
-    if not isinstance(projects_state, list):
-        logging.warning(f"Expected list of projects in state, got {type(projects_state)}. Fetching inbox tasks only.")
-        projects_state = []
-
     # Get unique project IDs from state, add inbox ID
-    project_ids = {p.get('id') for p in projects_state if isinstance(p, dict) and p.get('id')}
+    project_ids = {p.get('id') for p in projects_state if p.get('id')}
     try:
         if client.ticktick_client.inbox_id:
             project_ids.add(client.ticktick_client.inbox_id)
     except Exception as e:
         logging.error(f"Error accessing client inbox_id: {e}", exc_info=True)
 
-    if not project_ids:
-        logging.warning("No project IDs found (including inbox) to fetch tasks from.")
-        return []
-
-    logging.info(f"Fetching uncompleted tasks from {len(project_ids)} projects...")
+    logging.debug(f"Fetching uncompleted tasks from {len(project_ids)} projects...")
     for project_id in project_ids:
         try:
             # get_from_project fetches *uncompleted* tasks for a project
