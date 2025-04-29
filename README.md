@@ -4,9 +4,11 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 <!-- [![PyPI version](https://badge.fury.io/py/your-package-name.svg)](https://badge.fury.io/py/your-package-name) -->
 
-This project provides an MCP (Model Context Protocol) server that exposes tools for interacting with the [TickTick](https://ticktick.com/) task management service. It allows AI assistants and other applications compatible with MCP (like [Claude Desktop](https://www.anthropic.com/claude-desktop), VS Code Agent Mode, or libraries like [mcp-use](https://github.com/pietrozullo/mcp-use)) to leverage TickTick functionalities programmatically.
+![](images/ticktick_img.webp)
 
-Learn more about the Model Context Protocol at [modelcontextprotocol.io](https://modelcontextprotocol.io/).
+Enhance your TickTick workflow with this MCP server. Built upon the `ticktick-py` library, it offers significantly improved filtering capabilities, allowing AI assistants and MCP-compatible applications (like Claude Desktop, VS Code Agent Mode, or `mcp-use`) to interact with your tasks with greater precision and power.
+
+
 
 ## ✨ Features
 
