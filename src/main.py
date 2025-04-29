@@ -19,7 +19,6 @@ from ticktick_mcp.client import TickTickClientSingleton
 # with the imported 'mcp' instance.
 logging.info("Registering MCP tools...")
 from ticktick_mcp.tools import task_tools
-from ticktick_mcp.tools import generic_tools
 from ticktick_mcp.tools import filter_tools
 from ticktick_mcp.tools import conversion_tools
 logging.info("Tool registration complete.")
