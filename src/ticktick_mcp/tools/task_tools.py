@@ -1,7 +1,9 @@
 import datetime
 import logging
 from typing import Any, Dict, List, Optional, Union
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, GetCoreSchemaHandler, field_serializer, model_validator
+from ticktick.helpers.time_methods import convert_date_to_tick_tick_format
+from tzlocal import get_localzone
 
 # Import the shared MCP instance for the decorator
 from ..mcp_instance import mcp
@@ -40,7 +42,7 @@ class TaskObject(BaseModel):
     at API boundaries if ISO strings are used.
     """
     # --- Fields from User Schema ---
-    title: str
+    title: Optional[str] = None
     content: Optional[str] = None
     desc: Optional[str] = None # Often used interchangeably with content
     isAllDay: Optional[bool] = Field(None, alias="allDay") # Use schema name, alias for potential API mismatch
@@ -62,6 +64,14 @@ class TaskObject(BaseModel):
     completedTime: Optional[datetime.datetime] = None
     tags: Optional[List[str]] = None # List of tag names
     etag: Optional[str] = None # Entity tag for caching/updates
+    
+    @field_serializer('startDate', 'dueDate')
+    def serialize_datetime(self, value: datetime.datetime, _info: GetCoreSchemaHandler) -> str:
+        if value is None:
+            return None
+        if self.timeZone is None:
+            self.timeZone = get_localzone().key
+        return convert_date_to_tick_tick_format(value, self.timeZone)
 
     class Config:
         # Allow population by field name OR alias
@@ -259,7 +269,7 @@ async def update_task(
         {
             "task_object": {
                 "id": "task_id_67890",
-                "dueDate": "2024-08-05",
+                "dueDate": "2024-07-27T10:30:00+09:00",
                 "content": "Added details about project requirements",
                 "reminders": ["TRIGGER:-PT1H", "TRIGGER:-P1D"]
             }
@@ -287,7 +297,8 @@ async def update_task(
           Then: {
               "task_object": {
                   "id": "[found task ID]",
-                  "dueDate": "[next Friday in ISO format]"
+                  "startDate": "2024-07-27T09:00:00+09:00",
+                  "dueDate": "2024-07-27T10:30:00+09:00"
               }
           }
         - For updating subtasks, you must include the entire items array with all subtasks
@@ -302,9 +313,7 @@ async def update_task(
         task_obj = client.get_by_id(task_id)
         if not task_obj:
             return format_response({"error": f"Task with ID {task_id} not found or invalid.", "status": "not_found"})
-        logging.info(f"Updating task object: {task_object}")
         task_obj.update(task_object)
-        logging.info(f"Updated task object: {task_obj}")
         # The library expects the full task dictionary for update
         updated_task = client.task.update(task_object.model_dump(mode='json'))
         logging.info(f"Successfully updated task ID: {task_id}")
