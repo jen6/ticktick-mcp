@@ -196,10 +196,6 @@ async def ticktick_create_task(
     logging.info(f"Attempting to create task with title: '{title}'")
     try:
         client = TickTickClientSingleton.get_client()
-        if not client:
-            raise ToolLogicError("TickTick client is not available.")
-
-        # Convert date strings to datetime objects if provided
         try:
             start_dt = datetime.datetime.fromisoformat(startDate) if startDate else None
             due_dt = datetime.datetime.fromisoformat(dueDate) if dueDate else None
@@ -308,13 +304,9 @@ async def update_task(
 
     try:
         client = TickTickClientSingleton.get_client()
-        if not client:
-            raise ToolLogicError("TickTick client is not available.")
         task_obj = client.get_by_id(task_id)
-        if not task_obj:
-            return format_response({"error": f"Task with ID {task_id} not found or invalid.", "status": "not_found"})
         task_obj.update(task_object)
-        # The library expects the full task dictionary for update
+
         updated_task = client.task.update(task_object.model_dump(mode='json'))
         logging.info(f"Successfully updated task ID: {task_id}")
         return format_response(updated_task)
@@ -372,12 +364,9 @@ async def ticktick_delete_tasks(task_ids: Union[str, List[str]]) -> str:
     tasks_to_delete = []
     ids_to_process = task_ids if isinstance(task_ids, list) else [task_ids]
 
-    if not all(isinstance(tid, str) for tid in ids_to_process):
-         return format_response({"error": "Invalid input: task_ids must be a string or a list of strings.", "status": "error"})
-
     # ticktick-py delete expects task *objects*, not just IDs. We need to fetch them first.
     try:
-        tasks_to_delete = []
+        client = TickTickClientSingleton.get_client()
         missing_ids = []
         invalid_ids = [] # Track IDs that returned an object but wasn't a task
         for tid in ids_to_process:
@@ -472,13 +461,9 @@ async def ticktick_get_tasks_from_project(project_id: str) -> str:
           Then: {"project_id": "[found project ID]"}
         - If user wants completed tasks, use ticktick_filter_tasks instead
     """
-    if not isinstance(project_id, str):
-         return format_response({"error": "Invalid input: project_id must be a string."})
 
     try:
         client = TickTickClientSingleton.get_client()
-        if not client:
-            raise ToolLogicError("TickTick client is not available.")
         tasks = client.task.get_from_project(project_id)
         # Ensure result is a list even if API returns None or single dict
         if tasks is None:
@@ -528,26 +513,19 @@ async def ticktick_complete_task(task_id: str) -> str:
           Then: {"task_id": "[found task ID]"}
         - If the operation fails with "not_found", inform the user that the task couldn't be found
     """
-    if not isinstance(task_id, str):
-         return format_response({"error": "Invalid input: task_id must be a string."})
-
     try:
         client = TickTickClientSingleton.get_client()
-        if not client:
-            raise ToolLogicError("TickTick client is not available.")
-        # Need to fetch the task object first
+
         task_obj = client.get_by_id(task_id)
         if not task_obj or not isinstance(task_obj, dict) or not task_obj.get('projectId'):
             return format_response({"error": f"Task with ID {task_id} not found or invalid.", "status": "not_found"})
 
         completed_task_result = client.task.complete(task_obj)
-        # The method might return the original task or result object.
-        # Fetch again to confirm status change and return the updated object.
+
         updated_task_obj = client.get_by_id(task_id)
         if updated_task_obj and isinstance(updated_task_obj, dict) and updated_task_obj.get('status', 0) != 0:
              return format_response(updated_task_obj)
         else:
-             # If refetch fails or status didn't change, return original result/error
              logging.warning(f"Completed task {task_id}, but refetch failed or status unchanged. Result: {updated_task_obj}")
              return format_response(completed_task_result if completed_task_result else {"warning": "Completion API call succeeded but task status verification failed.", "task_id": task_id})
 
@@ -600,21 +578,16 @@ async def ticktick_move_task(task_id: str, new_project_id: str) -> str:
           }
         - If the project doesn't exist, suggest creating it first
     """
-    if not isinstance(task_id, str) or not isinstance(new_project_id, str):
-         return format_response({"error": "Invalid input: task_id and new_project_id must be strings."})
-
     try:
         client = TickTickClientSingleton.get_client()
-        if not client:
-            raise ToolLogicError("TickTick client is not available.")
-        # Need to fetch the task object first
+
         task_obj = client.get_by_id(task_id)
-        if not task_obj or not isinstance(task_obj, dict) or not task_obj.get('projectId'):
+        if not task_obj.get('projectId'):
             return format_response({"error": f"Task with ID {task_id} not found or invalid.", "status": "not_found"})
 
         # Check if the target project exists? (Optional, API might handle it)
         target_proj = client.get_by_id(new_project_id)
-        if not target_proj or not isinstance(target_proj, dict) or target_proj.get('id') != new_project_id:
+        if not target_proj:
             logging.warning(f"Target project {new_project_id} for moving task {task_id} not found or invalid.")
             # Allow the move attempt anyway, the API might handle this case.
             # return format_response({"error": f"Target project with ID {new_project_id} not found or invalid.", "status": "not_found"})
@@ -687,9 +660,7 @@ async def ticktick_make_subtask(parent_task_id: str, child_task_id: str) -> str:
 
     try:
         client = TickTickClientSingleton.get_client()
-        if not client:
-            raise ToolLogicError("TickTick client is not available.")
-        # Need to fetch both task objects
+
         child_task_obj = client.get_by_id(child_task_id)
         if not child_task_obj or not isinstance(child_task_obj, dict) or not child_task_obj.get('projectId'):
             return format_response({"error": f"Child task with ID {child_task_id} not found or invalid.", "status": "not_found"})
@@ -766,13 +737,8 @@ async def ticktick_get_by_id(obj_id: str) -> str:
           Then: {"obj_id": "[found task ID]"}
         - If the object is not found, explain to the user it might not exist or they might not have access
     """
-    if not isinstance(obj_id, str):
-        return format_response({"error": "Invalid input: obj_id must be a string."})
-
     try:
         client = TickTickClientSingleton.get_client()
-        if not client:
-            raise ToolLogicError("TickTick client is not available.")
         obj = client.get_by_id(obj_id)
         return format_response(obj)
     except Exception as e:
@@ -825,9 +791,6 @@ async def ticktick_get_all(search: str) -> str:
           "Show me all my projects" → {"search": "projects"}
           "List all my tags" → {"search": "tags"}
     """
-    if not isinstance(search, str):
-        return format_response({"error": "Invalid input: search must be a string."})
-
     try:
         client = TickTickClientSingleton.get_client()
         if not client:
