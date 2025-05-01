@@ -815,18 +815,15 @@ async def ticktick_get_all(search: str) -> str:
 
     Agent Usage Guide:
         - Use this tool to get a comprehensive list of a specific object type
-        - Particularly useful for discovering available projects, tags, or filters
+        - Particularly useful for discovering available projects, tags
         - For tasks, consider using ticktick_filter_tasks for more targeted results
         - Common search terms mapping:
           "projects" → list all projects
           "tasks" → list all uncompleted tasks
           "tags" → list all tags
-          "habits" → list all habits
-          "filters" → list all smart lists/filters
         - Example mapping:
           "Show me all my projects" → {"search": "projects"}
           "List all my tags" → {"search": "tags"}
-        - For finding tasks, prefer ticktick_filter_tasks as it provides more filtering options
     """
     if not isinstance(search, str):
         return format_response({"error": "Invalid input: search must be a string."})
@@ -838,13 +835,17 @@ async def ticktick_get_all(search: str) -> str:
         
         # Get all tasks initially treats search as case-sensitive
         search_lower = search.lower()
+        client.sync()
         if search_lower == "tasks":
             all_items = _get_all_tasks_from_ticktick()
+        elif search_lower == "projects":
+            projects = [ { "id": client.inbox_id, "name": "Inbox" } ] + client.state['projects']
+            return format_response(projects)
+        elif search_lower == "tags":
+            all_items = client.state['tags']
+            return format_response(all_items)
         else:
-            # Handle other object types
-            all_items = client.get_by_type(search)
-        
-        return format_response(all_items)
+            return format_response({"error": f"Invalid search type: {search}"})
     except Exception as e:
         logging.error(f"Failed to get all items of type {search}: {e}", exc_info=True)
         return format_response({"error": f"Failed to get all items of type {search}: {e}"})
