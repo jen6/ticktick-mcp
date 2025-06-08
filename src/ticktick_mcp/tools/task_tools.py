@@ -457,8 +457,8 @@ def _filter_unneeded_properties(tasks: List[Dict]) -> List[Dict]:
 
         # Remove some properties always
         remove_props = [
-            "columnId", "commentCount", "creator", "createdTime", "etag",
-            "focusSummaries", "isFloating", "modifiedTime", "repeatFirstData",
+            "columnId", "commentCount", "completedUserId", "creator", "createdTime", "etag",
+            "focusSummaries", "isFloating", "modifiedTime", "pomodoroSummaries", "repeatFirstData",
             "repeatFrom", "sortOrder"
         ]
         for prop in remove_props:
@@ -466,7 +466,10 @@ def _filter_unneeded_properties(tasks: List[Dict]) -> List[Dict]:
                 del task[prop]
 
         # Remove some properties when they are empty
-        remove_empty_props = ["attachments", "desc", "exDate", "items", "reminders", "repeatFlag"]
+        remove_empty_props = [
+            "attachments", "childIds", "desc", "exDate",
+            "items", "reminder", "reminders", "repeatFlag", "tags"
+        ]
         for prop in remove_empty_props:
             if prop in task and not task[prop]:
                 del task[prop]
