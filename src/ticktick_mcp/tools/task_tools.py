@@ -234,7 +234,7 @@ async def update_task(
     Updates the content of an existing task using its ID.
 
     Args:
-        task_object (TaskObject): A dictionary representing the task to update. Must include the 'id' field.
+        task_object (TaskObject): A dictionary representing the task to update. Must include the 'id' and 'projectId' fields.
                       All other fields are optional and represent what you want to change.
                       Date fields (startDate, dueDate) should be in ISO 8601 format.
 
@@ -247,6 +247,7 @@ async def update_task(
         - You can only update top-level task properties. Existing subtasks (items) can be replaced entirely,
           but individual properties of subtasks cannot be selectively modified
         - The task ID must be valid and refer to an existing task
+        - The projectId must be valid and refer to the existing project in which the task is present.
         - The updated task maintains its relationship with parent tasks (if any)
         - Certain fields cannot be modified once set (e.g., created time)
         - Due to TickTick API limitations, subtasks can only have startDate, not dueDate
@@ -256,6 +257,7 @@ async def update_task(
         {
             "task_object": {
                 "id": "task_id_12345",
+                "projectId": "55dea0a2c23748123456d385",
                 "title": "Revised Report Title",
                 "priority": 5
             }
@@ -265,6 +267,7 @@ async def update_task(
         {
             "task_object": {
                 "id": "task_id_67890",
+                "projectId": "fedcbaa2c23748123456abcd",
                 "dueDate": "2024-07-27T10:30:00+09:00",
                 "content": "Added details about project requirements",
                 "reminders": ["TRIGGER:-PT1H", "TRIGGER:-P1D"]
@@ -275,6 +278,7 @@ async def update_task(
         {
             "task_object": {
                 "id": "task_id_abcde",
+                "projectId": "12345678903748123456abcd",
                 "items": [
                     {"title": "New subtask 1"},
                     {"title": "New subtask 2"}
@@ -284,15 +288,16 @@ async def update_task(
 
     Agent Usage Guide:
         - When users ask to "update/change/modify/edit a task", use this tool
-        - Always include the task_id in the task_object
+        - Always include the task_id and the projectId in the task_object
         - Only include fields that need to be changed
         - Use ticktick_get_by_id first to retrieve the current task if needed
         - Example mapping:
           "Change the due date of my quarterly report task to next Friday" →
-          First use ticktick_get_by_id or ticktick_filter_tasks to find the task ID
+          First use ticktick_get_by_id or ticktick_filter_tasks to find the task ID and projectId
           Then: {
               "task_object": {
                   "id": "[found task ID]",
+                  "projectId": "[projectId in which task is present",]
                   "startDate": "2024-07-27T09:00:00+09:00",
                   "dueDate": "2024-07-27T10:30:00+09:00"
               }
