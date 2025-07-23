@@ -429,6 +429,72 @@ async def ticktick_delete_tasks(task_ids: Union[str, List[str]]) -> str:
         logging.error(f"Exception during task deletion for {task_ids}: {e}", exc_info=True)
         return format_response({"error": f"Failed to delete tasks {task_ids}: {e}", "status": "error"})
 
+def _filter_unneeded_properties(tasks: List[Dict]) -> List[Dict]:
+    """
+    Filters out unneeded properties from each task dictionary in the input list.
+
+    The function performs the following cleanups on each task:
+    - Removes integer properties with zero values from a predefined list.
+    - Removes certain properties always, regardless of their value.
+    - Removes certain properties if they are empty (e.g., empty lists, empty strings).
+    - Removes the 'kind' property if its value is the default "TEXT".
+    - Removes the 'isAllDay' property if it is False.
+    - Removes 'repeatTaskId' if it is equal to the task's own 'id'.
+
+    Args:
+        tasks (List[Dict]): A list of task dictionaries to be filtered.
+
+    Returns:
+        List[Dict]: A new list of task dictionaries with unneeded properties removed.
+    """
+    filtered = []
+
+    # Loop over the tasks and remove unneeded information
+    for task in tasks:
+        # Make a copy to avoid mutating the original task dict
+        task = task.copy()
+
+        # Remove zero value integer properties
+        zeroValueProps = ["deleted", "imgMode", "priority", "progress", "status"]
+        for prop in zeroValueProps:
+            if prop in task and task.get(prop, 0) == 0:
+                del task[prop]
+
+        # Remove some properties always
+        remove_props = [
+            "columnId", "commentCount", "completedUserId", "creator", "createdTime", "etag",
+            "focusSummaries", "isFloating", "modifiedTime", "pomodoroSummaries", "repeatFirstData",
+            "repeatFrom", "sortOrder"
+        ]
+        for prop in remove_props:
+            if prop in task:
+                del task[prop]
+
+        # Remove some properties when they are empty
+        remove_empty_props = [
+            "attachments", "childIds", "desc", "exDate",
+            "items", "reminder", "reminders", "repeatFlag", "tags"
+        ]
+        for prop in remove_empty_props:
+            if prop in task and not task[prop]:
+                del task[prop]
+
+        # Remove the default 'kind' property if it is the default "TEXT"
+        if task.get("kind") == "TEXT":
+            del task["kind"]
+
+        # Remove 'isAllDay' if False
+        if task.get("isAllDay") is False:
+            del task["isAllDay"]
+
+        # Remove 'repeatTaskId' if it equals the task's own 'id'
+        if "repeatTaskId" in task and task.get("id") == task.get("repeatTaskId"):
+            del task["repeatTaskId"]
+
+        filtered.append(task)
+
+    return filtered
+
 @mcp.tool()
 @require_ticktick_client
 async def ticktick_get_tasks_from_project(project_id: str) -> str:
@@ -475,6 +541,8 @@ async def ticktick_get_tasks_from_project(project_id: str) -> str:
              tasks = []
         elif isinstance(tasks, dict):
              tasks = [tasks]
+        # Remove unneeded information
+        tasks = _filter_unneeded_properties(tasks)
         return format_response(tasks)
     except Exception as e:
         logging.error(f"Failed to get tasks from project {project_id}: {e}", exc_info=True)
@@ -806,6 +874,9 @@ async def ticktick_get_all(search: str) -> str:
         client.sync()
         if search_lower == "tasks":
             all_items = _get_all_tasks_from_ticktick()
+            # Remove unneeded information
+            all_items = _filter_unneeded_properties(all_items)
+            return format_response(all_items)
         elif search_lower == "projects":
             projects = [ { "id": client.inbox_id, "name": "Inbox" } ] + client.state['projects']
             return format_response(projects)
