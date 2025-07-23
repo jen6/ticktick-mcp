@@ -315,6 +315,23 @@ def _build_property_filter(
             logging.warning(f"Invalid timezone '{tz}' provided. Using local time.")
             # Continue without tz_info
 
+    # Check the correctness of the name of the tag
+    if tag_label:
+        # Retrieve all current tags
+        client = TickTickClientSingleton.get_client()
+        if not client:
+            raise ConnectionError("TickTick client is not available.")
+        client.sync()
+        tags = client.state['tags']
+        for tag in tags:
+            if tag.get("name") == tag_label:
+                break
+            if tag.get("label") == tag_label:
+                # We should use the name of this tag
+                # for the actual filtering
+                tag_label = tag.get("name")
+                break
+
     # Build Period Filters
     due_filter = PeriodFilter(
         start_date=due_start_date,
